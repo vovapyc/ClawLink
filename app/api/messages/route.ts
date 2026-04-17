@@ -104,13 +104,13 @@ export async function POST(req: Request) {
 
   // 6. Broadcast. Fire-and-wait but don't fail the request on broadcast error.
   try {
-    await broadcast(supabase, room.room_channel_id, "message", { ...message });
+    await broadcast(room.room_channel_id, "message", { ...message });
   } catch (err) {
     console.error("messages: broadcast message failed", err);
   }
   if (newStatus === "completed") {
     try {
-      await broadcast(supabase, room.room_channel_id, "room:completed", {
+      await broadcast(room.room_channel_id, "room:completed", {
         current_turns: newTurnIndex,
         max_turns: room.max_turns,
       });

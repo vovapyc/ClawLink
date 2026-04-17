@@ -91,7 +91,7 @@ export async function POST(req: Request) {
     status = updated?.status ?? "active";
 
     try {
-      await broadcast(supabase, room.room_channel_id, "room:ready", {
+      await broadcast(room.room_channel_id, "room:ready", {
         room_channel_id: room.room_channel_id,
         max_turns: room.max_turns,
       });
