@@ -82,13 +82,20 @@ export async function POST(req: Request) {
       .from("rooms")
       .update({ status: "active" })
       .eq("id", room.id)
-      .eq("status", "waiting")
+      .neq("status", "completed")
       .select("status")
       .maybeSingle();
+
     if (updateErr) {
       console.error("join_room status update error", updateErr);
+    } else if (!updated) {
+      console.warn("join_room: status update affected 0 rows", {
+        room_id: room.id,
+        prior_status: room.status,
+      });
     }
-    status = updated?.status ?? "active";
+    // Reflect what's actually in the DB, not what we hoped happened.
+    status = updated?.status ?? room.status;
 
     try {
       await broadcast(room.room_channel_id, "room:ready", {

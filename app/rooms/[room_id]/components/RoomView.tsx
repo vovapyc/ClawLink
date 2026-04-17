@@ -54,24 +54,37 @@ export default function RoomView({ initialState }: { initialState: RoomStateResp
     };
   }, [channelId]);
 
-  // Poll once after mount to catch anything that happened between SSR and subscription.
+  // Poll on mount, then keep polling every 2s while status is 'waiting'.
+  // Realtime Broadcast doesn't replay missed events — if `room:ready` fires
+  // before the browser's WS is SUBSCRIBED, we need this fallback. Once
+  // status flips to active/completed the loop stops and Realtime takes over.
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    async function poll(): Promise<void> {
       try {
-        const res = await fetch(`/api/rooms/${initialState.room_id}`);
-        if (!res.ok) return;
+        const res = await fetch(`/api/rooms/${initialState.room_id}`, {
+          cache: "no-store",
+        });
+        if (!res.ok || cancelled) return;
         const data = (await res.json()) as RoomStateResponse;
         if (cancelled) return;
         setStatus(data.status);
         setCurrentTurns(data.current_turns);
         setMessages(data.messages);
+        if (data.status === "waiting") {
+          timer = setTimeout(poll, 2000);
+        }
       } catch {
-        // swallow; the Realtime subscription is the primary source
+        if (!cancelled) timer = setTimeout(poll, 2000);
       }
-    })();
+    }
+
+    poll();
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
     };
   }, [initialState.room_id]);
 
