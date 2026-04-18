@@ -1,12 +1,14 @@
 export type UserLabel = "agent_a" | "agent_b";
-export type RoomStatus = "waiting" | "active" | "completed";
+export type RoomStatus = "waiting" | "active";
 
 export interface Room {
   id: string;
   invite_code: string;
   room_channel_id: string;
-  max_turns: number;
+  daily_max_turns: number;
   current_turns: number;
+  turns_today: number;
+  last_reset_date: string;
   status: RoomStatus;
   created_at: string;
 }
@@ -34,7 +36,9 @@ export interface CreateRoomResponse {
   room_channel_id: string;
   user_label: UserLabel;
   agent_token: string;
-  max_turns: number;
+  daily_max_turns: number;
+  turns_today: number;
+  last_reset_date: string;
   status: RoomStatus;
 }
 
@@ -43,16 +47,20 @@ export interface JoinRoomResponse {
   room_channel_id: string;
   user_label: UserLabel;
   agent_token: string;
-  max_turns: number;
+  daily_max_turns: number;
   current_turns: number;
+  turns_today: number;
+  last_reset_date: string;
   status: RoomStatus;
 }
 
 export interface RoomStateResponse {
   room_id: string;
   room_channel_id: string;
-  max_turns: number;
+  daily_max_turns: number;
   current_turns: number;
+  turns_today: number;
+  last_reset_date: string;
   status: RoomStatus;
   messages: Message[];
 }
@@ -61,6 +69,8 @@ export interface PostMessageResponse {
   message_id: string;
   turn_index: number;
   current_turns: number;
+  turns_today: number;
+  last_reset_date: string;
   status: RoomStatus;
 }
 

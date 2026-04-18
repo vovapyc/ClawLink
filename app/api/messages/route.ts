@@ -9,6 +9,26 @@ import type { Message, PostMessageResponse, RoomStatus, UserLabel } from "@/lib/
 
 export const runtime = "nodejs";
 
+function todayUtcIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function nextUtcMidnightIso(): string {
+  const now = new Date();
+  const next = new Date(
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate() + 1,
+      0,
+      0,
+      0,
+      0
+    )
+  );
+  return next.toISOString();
+}
+
 export async function POST(req: Request) {
   const token = bearerToken(req);
   if (!token) return errorResponse(401, "missing_token");
@@ -44,7 +64,9 @@ export async function POST(req: Request) {
   // 2. Load room state
   const { data: room, error: roomErr } = await supabase
     .from("rooms")
-    .select("id, room_channel_id, max_turns, current_turns, status")
+    .select(
+      "id, room_channel_id, daily_max_turns, current_turns, turns_today, last_reset_date, status"
+    )
     .eq("id", participant.room_id)
     .single();
   if (roomErr) {
@@ -55,13 +77,29 @@ export async function POST(req: Request) {
     return errorResponse(409, "room_not_active", `room status is ${room.status}`);
   }
 
-  // 3. Enforce turn order: even current_turns → agent_a's turn, odd → agent_b's
+  // 3. Daily quota check (pre-RPC, to return a clean 429 vs. 409-race).
+  const today = todayUtcIso();
+  if (
+    room.last_reset_date === today &&
+    room.turns_today >= room.daily_max_turns
+  ) {
+    return NextResponse.json(
+      {
+        error: "daily_quota_reached",
+        message: `daily quota of ${room.daily_max_turns} reached`,
+        next_reset_at: nextUtcMidnightIso(),
+      },
+      { status: 429 }
+    );
+  }
+
+  // 4. Enforce turn order: even current_turns → agent_a's turn, odd → agent_b's
   const expected: UserLabel = room.current_turns % 2 === 0 ? "agent_a" : "agent_b";
   if (sender !== expected) {
     return errorResponse(403, "not_your_turn");
   }
 
-  // 4. Atomically advance the turn counter
+  // 5. Atomically advance the turn counter (lazy daily reset inside the RPC)
   const { data: advancedRows, error: advErr } = await supabase.rpc(
     "advance_room_turn",
     { p_room_id: room.id }
@@ -72,18 +110,19 @@ export async function POST(req: Request) {
   }
   const advanced = (advancedRows as Array<{
     current_turns: number;
+    turns_today: number;
+    daily_max_turns: number;
+    last_reset_date: string;
     status: RoomStatus;
-    max_turns: number;
   }> | null)?.[0];
   if (!advanced) {
-    // Someone else got here first, or room filled up between steps 2 and 4.
     return errorResponse(409, "turn_already_advanced");
   }
 
   const newTurnIndex = advanced.current_turns;
   const newStatus = advanced.status;
 
-  // 5. Insert the message row
+  // 6. Insert the message row
   const { data: inserted, error: insErr } = await supabase
     .from("messages")
     .insert({
@@ -102,27 +141,24 @@ export async function POST(req: Request) {
 
   const message = inserted as Message;
 
-  // 6. Broadcast. Fire-and-wait but don't fail the request on broadcast error.
+  // 7. Broadcast. Include quota state so clients can update without refetch.
   try {
-    await broadcast(room.room_channel_id, "message", { ...message });
+    await broadcast(room.room_channel_id, "message", {
+      ...message,
+      turns_today: advanced.turns_today,
+      daily_max_turns: advanced.daily_max_turns,
+      last_reset_date: advanced.last_reset_date,
+    });
   } catch (err) {
     console.error("messages: broadcast message failed", err);
-  }
-  if (newStatus === "completed") {
-    try {
-      await broadcast(room.room_channel_id, "room:completed", {
-        current_turns: newTurnIndex,
-        max_turns: room.max_turns,
-      });
-    } catch (err) {
-      console.error("messages: broadcast room:completed failed", err);
-    }
   }
 
   const response: PostMessageResponse = {
     message_id: message.id,
     turn_index: newTurnIndex,
     current_turns: newTurnIndex,
+    turns_today: advanced.turns_today,
+    last_reset_date: advanced.last_reset_date,
     status: newStatus,
   };
   return NextResponse.json(response, { status: 201 });

@@ -1,10 +1,10 @@
 import { z } from "zod";
 
 export const MAX_CONTENT_LENGTH = 8000;
-export const MAX_TURNS_LIMIT = 100;
+export const DAILY_MAX_TURNS_LIMIT = 100;
 
 export const createRoomSchema = z.object({
-  max_turns: z.number().int().min(2).max(MAX_TURNS_LIMIT),
+  daily_max_turns: z.number().int().min(2).max(DAILY_MAX_TURNS_LIMIT),
 });
 
 export const joinRoomSchema = z.object({

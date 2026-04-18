@@ -14,6 +14,32 @@ import ChatFeed from "./ChatFeed";
 import RoomStatusBadge from "./RoomStatusBadge";
 import TurnCounter from "./TurnCounter";
 
+function todayUtcIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function nextUtcMidnightLocal(): string {
+  const now = new Date();
+  const next = new Date(
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate() + 1,
+      0,
+      0,
+      0,
+      0
+    )
+  );
+  return next.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+type MessageWithQuota = Message & {
+  turns_today?: number;
+  daily_max_turns?: number;
+  last_reset_date?: string;
+};
+
 export default function RoomView({
   initialState,
 }: {
@@ -21,12 +47,27 @@ export default function RoomView({
 }) {
   const [status, setStatus] = useState<RoomStatus>(initialState.status);
   const [currentTurns, setCurrentTurns] = useState(initialState.current_turns);
+  const [turnsToday, setTurnsToday] = useState(initialState.turns_today);
+  const [dailyMaxTurns, setDailyMaxTurns] = useState(
+    initialState.daily_max_turns
+  );
+  const [lastResetDate, setLastResetDate] = useState(
+    initialState.last_reset_date
+  );
   const [messages, setMessages] = useState<Message[]>(initialState.messages);
   const [session, setSession] = useState<LocalAgentSession | null>(null);
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     setSession(loadSession(initialState.room_id));
   }, [initialState.room_id]);
+
+  // Tick once a minute so the derived "today" value rolls over naturally at
+  // UTC midnight without needing a broadcast.
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   const channelId = initialState.room_channel_id;
 
@@ -36,7 +77,7 @@ export default function RoomView({
 
     channel
       .on("broadcast", { event: "message" }, (payload) => {
-        const msg = payload.payload as Message;
+        const msg = payload.payload as MessageWithQuota;
         setMessages((prev) => {
           if (prev.some((m) => m.id === msg.id)) return prev;
           const next = [...prev, msg];
@@ -44,12 +85,14 @@ export default function RoomView({
           return next;
         });
         setCurrentTurns((prev) => Math.max(prev, msg.turn_index));
+        if (typeof msg.turns_today === "number") setTurnsToday(msg.turns_today);
+        if (typeof msg.daily_max_turns === "number")
+          setDailyMaxTurns(msg.daily_max_turns);
+        if (typeof msg.last_reset_date === "string")
+          setLastResetDate(msg.last_reset_date);
       })
       .on("broadcast", { event: "room:ready" }, () => {
         setStatus("active");
-      })
-      .on("broadcast", { event: "room:completed" }, () => {
-        setStatus("completed");
       })
       .subscribe();
 
@@ -73,6 +116,9 @@ export default function RoomView({
         if (cancelled) return;
         setStatus(data.status);
         setCurrentTurns(data.current_turns);
+        setTurnsToday(data.turns_today);
+        setDailyMaxTurns(data.daily_max_turns);
+        setLastResetDate(data.last_reset_date);
         setMessages(data.messages);
         if (data.status === "waiting") {
           timer = setTimeout(poll, 2000);
@@ -94,7 +140,15 @@ export default function RoomView({
     return window.location.origin;
   }, []);
 
-  const pct = Math.round((currentTurns / initialState.max_turns) * 100);
+  // `now` participates so this recomputes at the minute tick + UTC midnight.
+  void now;
+  const today = todayUtcIso();
+  const effectiveTurnsToday = lastResetDate === today ? turnsToday : 0;
+  const pct =
+    dailyMaxTurns > 0
+      ? Math.round((effectiveTurnsToday / dailyMaxTurns) * 100)
+      : 0;
+  const quotaReached = effectiveTurnsToday >= dailyMaxTurns;
 
   return (
     <>
@@ -123,7 +177,7 @@ export default function RoomView({
             justifyContent: "flex-end",
           }}
         >
-          <TurnCounter current={currentTurns} max={initialState.max_turns} />
+          <TurnCounter today={effectiveTurnsToday} dailyMax={dailyMaxTurns} />
           <div className="metric">
             <span className="k">BUDGET</span>
             <span className="v">{pct}%</span>
@@ -142,11 +196,11 @@ export default function RoomView({
 
       <ChatFeed messages={messages} myLabel={session?.user_label ?? null} />
 
-      {status === "completed" && (
+      {status === "active" && quotaReached && (
         <div className="banner-complete">
-          ▶ TRANSMISSION SEALED · {currentTurns}{" "}
-          <span className="pct">/ {initialState.max_turns}</span> TURNS LOGGED ·
-          EXPORT AVAILABLE VIA API
+          ▶ DAILY QUOTA REACHED · {effectiveTurnsToday}
+          <span className="pct"> / {dailyMaxTurns}</span> TURNS TODAY · RESUMES AT
+          00:00 UTC ({nextUtcMidnightLocal()} LOCAL)
         </div>
       )}
     </>

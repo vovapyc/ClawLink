@@ -7,11 +7,11 @@ import type { CreateRoomResponse } from "@/lib/types";
 
 export default function CreateRoomPage() {
   const router = useRouter();
-  const [maxTurns, setMaxTurns] = useState(10);
+  const [dailyMaxTurns, setDailyMaxTurns] = useState(10);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const preview = Array.from({ length: Math.min(maxTurns, 24) }, (_, i) => i);
+  const preview = Array.from({ length: Math.min(dailyMaxTurns, 24) }, (_, i) => i);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -21,7 +21,7 @@ export default function CreateRoomPage() {
       const res = await fetch("/api/rooms", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ max_turns: maxTurns }),
+        body: JSON.stringify({ daily_max_turns: dailyMaxTurns }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -65,30 +65,30 @@ export default function CreateRoomPage() {
 
         <form onSubmit={handleSubmit}>
           <div style={{ marginBottom: 22 }}>
-            <label className="field" htmlFor="max_turns">
-              Turn budget <span className="req">*</span>
+            <label className="field" htmlFor="daily_max_turns">
+              Daily turn budget <span className="req">*</span>
             </label>
             <div className="stepper">
               <button
                 type="button"
-                onClick={() => setMaxTurns(Math.max(2, maxTurns - 1))}
+                onClick={() => setDailyMaxTurns(Math.max(2, dailyMaxTurns - 1))}
                 aria-label="Decrease"
               >−</button>
               <input
-                id="max_turns"
+                id="daily_max_turns"
                 className="input"
                 type="number"
                 min={2}
                 max={100}
                 required
-                value={maxTurns}
+                value={dailyMaxTurns}
                 onChange={(e) =>
-                  setMaxTurns(Math.max(2, Math.min(100, Number(e.target.value) || 0)))
+                  setDailyMaxTurns(Math.max(2, Math.min(100, Number(e.target.value) || 0)))
                 }
               />
               <button
                 type="button"
-                onClick={() => setMaxTurns(Math.min(100, maxTurns + 1))}
+                onClick={() => setDailyMaxTurns(Math.min(100, dailyMaxTurns + 1))}
                 aria-label="Increase"
               >+</button>
             </div>
@@ -96,7 +96,7 @@ export default function CreateRoomPage() {
               {preview.map((i) => (
                 <span key={i} className="on" />
               ))}
-              {maxTurns > 24 && (
+              {dailyMaxTurns > 24 && (
                 <span
                   className="hint"
                   style={{
@@ -106,12 +106,12 @@ export default function CreateRoomPage() {
                     height: "auto",
                   }}
                 >
-                  +{maxTurns - 24} more
+                  +{dailyMaxTurns - 24} more
                 </span>
               )}
             </div>
             <p className="help">
-              Total messages across both agents before the channel auto-seals.
+              Messages allowed per UTC day across both agents. Resets at 00:00 UTC.
             </p>
           </div>
 
@@ -144,7 +144,7 @@ export default function CreateRoomPage() {
 {`> POST `}<span className="k">/api/rooms</span>{`
   Content-Type: application/json
 
-  { `}<span className="s">&quot;max_turns&quot;</span>{`: `}<span className="n">{maxTurns}</span>{` }
+  { `}<span className="s">&quot;daily_max_turns&quot;</span>{`: `}<span className="n">{dailyMaxTurns}</span>{` }
 
 `}<span className="c">{`// response`}</span>{`
   {
@@ -186,7 +186,7 @@ export default function CreateRoomPage() {
             <li className="hint" style={{ display: "flex", gap: 10 }}>
               <span style={{ color: "var(--warn)" }}>◉</span>
               <span style={{ color: "var(--fg-1)" }}>
-                Channels auto-seal at the turn budget and cannot be reopened.
+                Daily quota resets at 00:00 UTC. Rooms stay open indefinitely.
               </span>
             </li>
           </ul>

@@ -1,6 +1,6 @@
 import { env } from "@/lib/env";
 
-export type BroadcastEvent = "message" | "room:ready" | "room:completed";
+export type BroadcastEvent = "message" | "room:ready";
 
 /**
  * Fires a Realtime Broadcast via Supabase's stateless HTTP endpoint.

@@ -1,17 +1,17 @@
 export default function TurnCounter({
-  current,
-  max,
+  today,
+  dailyMax,
 }: {
-  current: number;
-  max: number;
+  today: number;
+  dailyMax: number;
 }) {
   const pad = (n: number) => String(n).padStart(2, "0");
   return (
     <div className="metric">
-      <span className="k">TURN</span>
+      <span className="k">TURN TODAY</span>
       <span className="v">
-        {pad(current)}
-        <span className="sub"> / {pad(max)}</span>
+        {pad(today)}
+        <span className="sub"> / {pad(dailyMax)}</span>
       </span>
     </div>
   );

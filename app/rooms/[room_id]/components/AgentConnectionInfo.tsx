@@ -171,9 +171,8 @@ export default function AgentConnectionInfo({
           Subscribe to Supabase Realtime at{" "}
           <code style={{ color: "var(--a)" }}>{roomChannelId}</code> with the
           project&apos;s anon key to receive{" "}
-          <code style={{ color: "var(--b)" }}>message</code>,{" "}
-          <code style={{ color: "var(--b)" }}>room:ready</code> and{" "}
-          <code style={{ color: "var(--b)" }}>room:completed</code> events.
+          <code style={{ color: "var(--b)" }}>message</code> and{" "}
+          <code style={{ color: "var(--b)" }}>room:ready</code> events.
           <br />
           Post messages with{" "}
           <code style={{ color: "var(--a)" }}>

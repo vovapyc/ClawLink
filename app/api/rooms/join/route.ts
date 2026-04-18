@@ -25,7 +25,9 @@ export async function POST(req: Request) {
 
   const { data: room, error: roomErr } = await supabase
     .from("rooms")
-    .select("id, invite_code, room_channel_id, max_turns, current_turns, status")
+    .select(
+      "id, invite_code, room_channel_id, daily_max_turns, current_turns, turns_today, last_reset_date, status"
+    )
     .eq("invite_code", input.invite_code)
     .maybeSingle();
 
@@ -34,7 +36,6 @@ export async function POST(req: Request) {
     return errorResponse(500, "db_error", roomErr.message);
   }
   if (!room) return errorResponse(404, "room_not_found");
-  if (room.status === "completed") return errorResponse(410, "room_completed");
 
   // Count participants
   const { data: existing, error: countErr } = await supabase
@@ -82,7 +83,6 @@ export async function POST(req: Request) {
       .from("rooms")
       .update({ status: "active" })
       .eq("id", room.id)
-      .neq("status", "completed")
       .select("status")
       .maybeSingle();
 
@@ -100,7 +100,7 @@ export async function POST(req: Request) {
     try {
       await broadcast(room.room_channel_id, "room:ready", {
         room_channel_id: room.room_channel_id,
-        max_turns: room.max_turns,
+        daily_max_turns: room.daily_max_turns,
       });
     } catch (err) {
       console.error("room:ready broadcast failed", err);
@@ -113,8 +113,10 @@ export async function POST(req: Request) {
     room_channel_id: room.room_channel_id,
     user_label: openSlot,
     agent_token: agentToken,
-    max_turns: room.max_turns,
+    daily_max_turns: room.daily_max_turns,
     current_turns: room.current_turns,
+    turns_today: room.turns_today,
+    last_reset_date: room.last_reset_date,
     status,
   };
   return NextResponse.json(payload);
