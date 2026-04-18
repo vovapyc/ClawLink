@@ -1,7 +1,18 @@
-export default function TurnCounter({ current, max }: { current: number; max: number }) {
+export default function TurnCounter({
+  current,
+  max,
+}: {
+  current: number;
+  max: number;
+}) {
+  const pad = (n: number) => String(n).padStart(2, "0");
   return (
-    <span className="inline-flex items-center rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700">
-      Turn {current} / {max}
-    </span>
+    <div className="metric">
+      <span className="k">TURN</span>
+      <span className="v">
+        {pad(current)}
+        <span className="sub"> / {pad(max)}</span>
+      </span>
+    </div>
   );
 }

@@ -14,7 +14,11 @@ import ChatFeed from "./ChatFeed";
 import RoomStatusBadge from "./RoomStatusBadge";
 import TurnCounter from "./TurnCounter";
 
-export default function RoomView({ initialState }: { initialState: RoomStateResponse }) {
+export default function RoomView({
+  initialState,
+}: {
+  initialState: RoomStateResponse;
+}) {
   const [status, setStatus] = useState<RoomStatus>(initialState.status);
   const [currentTurns, setCurrentTurns] = useState(initialState.current_turns);
   const [messages, setMessages] = useState<Message[]>(initialState.messages);
@@ -55,9 +59,6 @@ export default function RoomView({ initialState }: { initialState: RoomStateResp
   }, [channelId]);
 
   // Poll on mount, then keep polling every 2s while status is 'waiting'.
-  // Realtime Broadcast doesn't replay missed events — if `room:ready` fires
-  // before the browser's WS is SUBSCRIBED, we need this fallback. Once
-  // status flips to active/completed the loop stops and Realtime takes over.
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -93,15 +94,40 @@ export default function RoomView({ initialState }: { initialState: RoomStateResp
     return window.location.origin;
   }, []);
 
+  const pct = Math.round((currentTurns / initialState.max_turns) * 100);
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <>
+      <div className="room-header">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Room</h1>
-          <p className="text-sm text-slate-500 font-mono">{initialState.room_id}</p>
+          <div className="eyebrow">
+            <span className="chip">03 / LIVE</span>
+            DUAL-AGENT OBSERVATORY
+          </div>
+          <h1 className="display" style={{ fontSize: 34, marginTop: 6 }}>
+            Channel open.
+          </h1>
+          <div className="room-id">
+            <span className="hash">#</span> {initialState.room_id}{" "}
+            <span style={{ color: "var(--fg-3)" }}>·</span> channel{" "}
+            <span className="hash">@</span>
+            {channelId}
+          </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            alignItems: "center",
+            flexWrap: "wrap",
+            justifyContent: "flex-end",
+          }}
+        >
           <TurnCounter current={currentTurns} max={initialState.max_turns} />
+          <div className="metric">
+            <span className="k">BUDGET</span>
+            <span className="v">{pct}%</span>
+          </div>
           <RoomStatusBadge status={status} />
         </div>
       </div>
@@ -117,10 +143,12 @@ export default function RoomView({ initialState }: { initialState: RoomStateResp
       <ChatFeed messages={messages} myLabel={session?.user_label ?? null} />
 
       {status === "completed" && (
-        <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 text-center">
-          Conversation completed — {currentTurns} / {initialState.max_turns} turns.
+        <div className="banner-complete">
+          ▶ TRANSMISSION SEALED · {currentTurns}{" "}
+          <span className="pct">/ {initialState.max_turns}</span> TURNS LOGGED ·
+          EXPORT AVAILABLE VIA API
         </div>
       )}
-    </div>
+    </>
   );
 }
