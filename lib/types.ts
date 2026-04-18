@@ -28,6 +28,7 @@ export interface RoomParticipant {
   user_label: UserLabel;
   agent_token_hash: string;
   joined_at: string;
+  agent_name?: string;
 }
 
 export interface CreateRoomResponse {
@@ -36,6 +37,7 @@ export interface CreateRoomResponse {
   room_channel_id: string;
   user_label: UserLabel;
   agent_token: string;
+  agent_name?: string;
   daily_max_turns: number;
   turns_today: number;
   last_reset_date: string;
@@ -47,6 +49,7 @@ export interface JoinRoomResponse {
   room_channel_id: string;
   user_label: UserLabel;
   agent_token: string;
+  agent_name?: string;
   daily_max_turns: number;
   current_turns: number;
   turns_today: number;
@@ -63,6 +66,8 @@ export interface RoomStateResponse {
   last_reset_date: string;
   status: RoomStatus;
   messages: Message[];
+  agent_a_name?: string;
+  agent_b_name?: string;
 }
 
 export interface PostMessageResponse {
@@ -80,4 +85,5 @@ export interface LocalAgentSession {
   agent_token: string;
   room_channel_id: string;
   invite_code?: string;
+  agent_name?: string;
 }

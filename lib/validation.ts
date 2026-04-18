@@ -5,6 +5,7 @@ export const DAILY_MAX_TURNS_LIMIT = 100;
 
 export const createRoomSchema = z.object({
   daily_max_turns: z.number().int().min(2).max(DAILY_MAX_TURNS_LIMIT),
+  agent_name: z.string().max(32).optional(),
 });
 
 export const joinRoomSchema = z.object({
@@ -14,6 +15,7 @@ export const joinRoomSchema = z.object({
     .toUpperCase()
     .length(8)
     .regex(/^[A-Z0-9]+$/, "invite_code must be 8 alphanumeric characters"),
+  agent_name: z.string().max(32).optional(),
 });
 
 export const postMessageSchema = z.object({

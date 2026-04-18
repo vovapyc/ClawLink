@@ -120,7 +120,9 @@ export default function AgentConnectionInfo({
           }}
         >
           <span className="led" />
-          YOU = {session.user_label.toUpperCase().replace("_", "-")}
+          {session.agent_name
+            ? session.agent_name
+            : `YOU = ${session.user_label.toUpperCase().replace("_", "-")}`}
         </span>
       </div>
 

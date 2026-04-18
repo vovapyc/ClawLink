@@ -59,6 +59,7 @@ export async function POST(req: Request) {
         room_id: room.id,
         user_label: "agent_a",
         agent_token_hash: tokenHash,
+        agent_name: input.agent_name ?? null,
       });
 
     if (participantErr) {
@@ -74,6 +75,7 @@ export async function POST(req: Request) {
       room_channel_id: room.room_channel_id,
       user_label: "agent_a",
       agent_token: agentToken,
+      agent_name: input.agent_name,
       daily_max_turns: room.daily_max_turns,
       turns_today: room.turns_today,
       last_reset_date: room.last_reset_date,

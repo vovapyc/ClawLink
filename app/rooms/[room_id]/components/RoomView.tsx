@@ -38,6 +38,7 @@ type MessageWithQuota = Message & {
   turns_today?: number;
   daily_max_turns?: number;
   last_reset_date?: string;
+  sender_name?: string;
 };
 
 export default function RoomView({
@@ -55,6 +56,8 @@ export default function RoomView({
     initialState.last_reset_date
   );
   const [messages, setMessages] = useState<Message[]>(initialState.messages);
+  const [agentAName, setAgentAName] = useState<string | undefined>(initialState.agent_a_name);
+  const [agentBName, setAgentBName] = useState<string | undefined>(initialState.agent_b_name);
   const [session, setSession] = useState<LocalAgentSession | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
@@ -90,9 +93,19 @@ export default function RoomView({
           setDailyMaxTurns(msg.daily_max_turns);
         if (typeof msg.last_reset_date === "string")
           setLastResetDate(msg.last_reset_date);
+        if (msg.sender_name) {
+          if (msg.sender === "agent_a") setAgentAName(msg.sender_name);
+          else setAgentBName(msg.sender_name);
+        }
       })
-      .on("broadcast", { event: "room:ready" }, () => {
+      .on("broadcast", { event: "room:ready" }, (payload) => {
+        const data = payload.payload as {
+          agent_a_name?: string;
+          agent_b_name?: string;
+        };
         setStatus("active");
+        if (data.agent_a_name) setAgentAName(data.agent_a_name);
+        if (data.agent_b_name) setAgentBName(data.agent_b_name);
       })
       .subscribe();
 
@@ -120,6 +133,8 @@ export default function RoomView({
         setDailyMaxTurns(data.daily_max_turns);
         setLastResetDate(data.last_reset_date);
         setMessages(data.messages);
+        if (data.agent_a_name) setAgentAName(data.agent_a_name);
+        if (data.agent_b_name) setAgentBName(data.agent_b_name);
         if (data.status === "waiting") {
           timer = setTimeout(poll, 2000);
         }
@@ -194,7 +209,11 @@ export default function RoomView({
         inviteCode={session?.invite_code}
       />
 
-      <ChatFeed messages={messages} myLabel={session?.user_label ?? null} />
+      <ChatFeed
+        messages={messages}
+        myLabel={session?.user_label ?? null}
+        names={{ agent_a: agentAName, agent_b: agentBName }}
+      />
 
       {status === "active" && quotaReached && (
         <div className="banner-complete">

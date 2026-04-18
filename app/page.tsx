@@ -8,6 +8,7 @@ import type { CreateRoomResponse } from "@/lib/types";
 export default function CreateRoomPage() {
   const router = useRouter();
   const [dailyMaxTurns, setDailyMaxTurns] = useState(10);
+  const [agentName, setAgentName] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -21,7 +22,10 @@ export default function CreateRoomPage() {
       const res = await fetch("/api/rooms", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ daily_max_turns: dailyMaxTurns }),
+        body: JSON.stringify({
+          daily_max_turns: dailyMaxTurns,
+          ...(agentName.trim() ? { agent_name: agentName.trim() } : {}),
+        }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -34,6 +38,7 @@ export default function CreateRoomPage() {
         agent_token: data.agent_token,
         room_channel_id: data.room_channel_id,
         invite_code: data.invite_code,
+        agent_name: data.agent_name,
       });
       router.push(`/rooms/${data.room_id}`);
     } catch (err) {
@@ -64,6 +69,22 @@ export default function CreateRoomPage() {
         <hr className="hr" />
 
         <form onSubmit={handleSubmit}>
+          <div style={{ marginBottom: 22 }}>
+            <label className="field" htmlFor="agent_name">
+              Agent name <span style={{ color: "var(--fg-3)" }}>(optional)</span>
+            </label>
+            <input
+              id="agent_name"
+              className="input"
+              type="text"
+              maxLength={32}
+              placeholder="e.g. Claude Opus 4.7"
+              value={agentName}
+              onChange={(e) => setAgentName(e.target.value)}
+            />
+            <p className="help">Displayed in the chat interface instead of "AGENT-A".</p>
+          </div>
+
           <div style={{ marginBottom: 22 }}>
             <label className="field" htmlFor="daily_max_turns">
               Daily turn budget <span className="req">*</span>

@@ -8,6 +8,7 @@ import type { JoinRoomResponse } from "@/lib/types";
 export default function JoinRoomPage() {
   const router = useRouter();
   const [chars, setChars] = useState<string[]>(Array(8).fill(""));
+  const [agentName, setAgentName] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const refs = useRef<Array<HTMLInputElement | null>>([]);
@@ -58,7 +59,10 @@ export default function JoinRoomPage() {
       const res = await fetch("/api/rooms/join", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ invite_code: code }),
+        body: JSON.stringify({
+          invite_code: code,
+          ...(agentName.trim() ? { agent_name: agentName.trim() } : {}),
+        }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -70,6 +74,7 @@ export default function JoinRoomPage() {
         user_label: data.user_label,
         agent_token: data.agent_token,
         room_channel_id: data.room_channel_id,
+        agent_name: data.agent_name,
       });
       router.push(`/rooms/${data.room_id}`);
     } catch (err) {
@@ -98,6 +103,22 @@ export default function JoinRoomPage() {
         <hr className="hr" />
 
         <form onSubmit={handleSubmit}>
+          <div style={{ marginBottom: 22 }}>
+            <label className="field" htmlFor="agent_name_join">
+              Agent name <span style={{ color: "var(--fg-3)" }}>(optional)</span>
+            </label>
+            <input
+              id="agent_name_join"
+              className="input"
+              type="text"
+              maxLength={32}
+              placeholder="e.g. Claude Haiku 4.5"
+              value={agentName}
+              onChange={(e) => setAgentName(e.target.value)}
+            />
+            <p className="help">Displayed in the chat interface instead of "AGENT-B".</p>
+          </div>
+
           <label className="field" htmlFor="c0">
             Invite code <span className="req">*</span>
           </label>

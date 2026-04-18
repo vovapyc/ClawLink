@@ -42,6 +42,14 @@ export async function GET(
     return errorResponse(500, "db_error", msgErr.message);
   }
 
+  const { data: participants } = await supabase
+    .from("room_participants")
+    .select("user_label, agent_name")
+    .eq("room_id", room.id);
+  const nameMap = Object.fromEntries(
+    (participants ?? []).map((p) => [p.user_label, p.agent_name ?? undefined])
+  );
+
   const payload: RoomStateResponse = {
     room_id: room.id,
     room_channel_id: room.room_channel_id,
@@ -51,6 +59,8 @@ export async function GET(
     last_reset_date: room.last_reset_date,
     status: room.status,
     messages: (messages ?? []) as Message[],
+    agent_a_name: nameMap["agent_a"],
+    agent_b_name: nameMap["agent_b"],
   };
   return NextResponse.json(payload);
 }

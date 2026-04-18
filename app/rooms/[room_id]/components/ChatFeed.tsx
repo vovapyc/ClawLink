@@ -3,9 +3,9 @@
 import { useEffect, useRef } from "react";
 import type { Message, UserLabel } from "@/lib/types";
 
-const AGENT_LABEL: Record<UserLabel, string> = {
-  agent_a: "AGENT-A / HX-9",
-  agent_b: "AGENT-B / ARCHIVE",
+const AGENT_FALLBACK: Record<UserLabel, string> = {
+  agent_a: "AGENT-A",
+  agent_b: "AGENT-B",
 };
 
 function Waveform({ side }: { side: "left" | "right" }) {
@@ -27,16 +27,18 @@ function AgentHead({
   side,
   label,
   mine,
+  name,
 }: {
   side: "left" | "right";
   label: UserLabel;
   mine: boolean;
+  name?: string;
 }) {
   return (
     <div className={`agent-head ${side}`}>
       <div className="name">
         <span className="led" />
-        <span>{AGENT_LABEL[label]}</span>
+        <span>{name ?? AGENT_FALLBACK[label]}</span>
         {mine && (
           <span style={{ color: "var(--fg-2)", fontSize: 9 }}>· YOU</span>
         )}
@@ -63,13 +65,15 @@ function EmptyFeed() {
 function Bubble({
   msg,
   mine,
+  senderName,
 }: {
   msg: Message;
   mine: boolean;
+  senderName?: string;
 }) {
   const isA = msg.sender === "agent_a";
   const sideClass = isA ? "left a" : "right b";
-  const tag = isA ? "AGENT-A" : "AGENT-B";
+  const tag = senderName ?? (isA ? "AGENT-A" : "AGENT-B");
   const ts = new Date(msg.created_at).toLocaleTimeString("en-GB", {
     hour12: false,
   });
@@ -89,9 +93,11 @@ function Bubble({
 export default function ChatFeed({
   messages,
   myLabel,
+  names = {},
 }: {
   messages: Message[];
   myLabel: UserLabel | null;
+  names?: { agent_a?: string; agent_b?: string };
 }) {
   const feedRef = useRef<HTMLDivElement | null>(null);
 
@@ -104,12 +110,12 @@ export default function ChatFeed({
   return (
     <section className="stage">
       <div className="stage-header">
-        <AgentHead side="left" label="agent_a" mine={myLabel === "agent_a"} />
+        <AgentHead side="left" label="agent_a" mine={myLabel === "agent_a"} name={names.agent_a} />
         <div className="vs">
           <div className="ring"><div className="dot" /></div>
           DUPLEX
         </div>
-        <AgentHead side="right" label="agent_b" mine={myLabel === "agent_b"} />
+        <AgentHead side="right" label="agent_b" mine={myLabel === "agent_b"} name={names.agent_b} />
       </div>
 
       <div className="feed" ref={feedRef}>
@@ -121,8 +127,11 @@ export default function ChatFeed({
               key={m.id}
               className={`msg ${m.sender === "agent_a" ? "from-a" : "from-b"}`}
             >
-              <Bubble msg={m} mine={myLabel === m.sender} />
-              <Bubble msg={m} mine={myLabel === m.sender} />
+              <Bubble
+                msg={m}
+                mine={myLabel === m.sender}
+                senderName={names[m.sender]}
+              />
             </div>
           ))
         )}

@@ -37,22 +37,23 @@ export async function POST(req: Request) {
   }
   if (!room) return errorResponse(404, "room_not_found");
 
-  // Count participants
+  // Count participants (also fetch agent_name for room:ready broadcast)
   const { data: existing, error: countErr } = await supabase
     .from("room_participants")
-    .select("user_label")
+    .select("user_label, agent_name")
     .eq("room_id", room.id);
   if (countErr) {
     console.error("join_room count error", countErr);
     return errorResponse(500, "db_error", countErr.message);
   }
 
-  if ((existing?.length ?? 0) >= 2) {
+  // Figure out which slot is open
+  const existingList = existing ?? [];
+
+  if (existingList.length >= 2) {
     return errorResponse(409, "room_full");
   }
-
-  // Figure out which slot is open
-  const taken = new Set((existing ?? []).map((p) => p.user_label));
+  const taken = new Set(existingList.map((p) => p.user_label));
   const openSlot = (["agent_a", "agent_b"] as const).find((s) => !taken.has(s));
   if (!openSlot) return errorResponse(409, "room_full");
 
@@ -67,6 +68,7 @@ export async function POST(req: Request) {
       room_id: room.id,
       user_label: openSlot,
       agent_token_hash: tokenHash,
+      agent_name: input.agent_name ?? null,
     });
 
   if (insertErr) {
@@ -78,7 +80,7 @@ export async function POST(req: Request) {
 
   // Flip room to active if both seats are filled
   let status = room.status;
-  if ((existing?.length ?? 0) + 1 >= 2) {
+  if (existingList.length + 1 >= 2) {
     const { data: updated, error: updateErr } = await supabase
       .from("rooms")
       .update({ status: "active" })
@@ -98,9 +100,19 @@ export async function POST(req: Request) {
     status = updated?.status ?? room.status;
 
     try {
+      // Build a name map from existing participants + the joiner we just inserted
+      const allParticipants = [
+        ...existingList,
+        { user_label: openSlot, agent_name: input.agent_name ?? null },
+      ];
+      const nameMap = Object.fromEntries(
+        allParticipants.map((p) => [p.user_label, p.agent_name ?? undefined])
+      );
       await broadcast(room.room_channel_id, "room:ready", {
         room_channel_id: room.room_channel_id,
         daily_max_turns: room.daily_max_turns,
+        agent_a_name: nameMap["agent_a"],
+        agent_b_name: nameMap["agent_b"],
       });
     } catch (err) {
       console.error("room:ready broadcast failed", err);
@@ -113,6 +125,7 @@ export async function POST(req: Request) {
     room_channel_id: room.room_channel_id,
     user_label: openSlot,
     agent_token: agentToken,
+    agent_name: input.agent_name,
     daily_max_turns: room.daily_max_turns,
     current_turns: room.current_turns,
     turns_today: room.turns_today,

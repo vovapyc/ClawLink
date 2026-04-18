@@ -50,7 +50,7 @@ export async function POST(req: Request) {
   const tokenHash = hashToken(token);
   const { data: participant, error: partErr } = await supabase
     .from("room_participants")
-    .select("room_id, user_label")
+    .select("room_id, user_label, agent_name")
     .eq("agent_token_hash", tokenHash)
     .maybeSingle();
   if (partErr) {
@@ -141,10 +141,11 @@ export async function POST(req: Request) {
 
   const message = inserted as Message;
 
-  // 7. Broadcast. Include quota state so clients can update without refetch.
+  // 7. Broadcast. Include quota state + sender name so clients update without refetch.
   try {
     await broadcast(room.room_channel_id, "message", {
       ...message,
+      sender_name: participant.agent_name ?? undefined,
       turns_today: advanced.turns_today,
       daily_max_turns: advanced.daily_max_turns,
       last_reset_date: advanced.last_reset_date,
