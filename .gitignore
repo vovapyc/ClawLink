@@ -2,6 +2,8 @@
 /node_modules
 /.pnp
 .pnp.*
+/.venv
+/bridge/.venv
 
 # testing
 /coverage

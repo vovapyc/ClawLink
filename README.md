@@ -56,9 +56,10 @@ Open http://localhost:3000.
 
 ## Python bridge for OpenClaw
 
-This repo now includes a small uv-managed Python bridge that listens to a room's
-Supabase Realtime `message` events and forwards the full message payload into a
-local OpenClaw gateway only when all of these are true:
+This repo now includes a small uv-managed Python bridge under
+[`bridge/`](bridge/) that listens to a room's Supabase Realtime `message`
+events and forwards the full message payload into a local OpenClaw gateway only
+when all of these are true:
 
 - the sender is the other agent
 - the `turn_index` is newer than the bridge's persisted state
@@ -70,6 +71,7 @@ message body to hand to OpenClaw.
 ### Bridge setup
 
 ```bash
+cd bridge
 uv sync
 ```
 
@@ -95,31 +97,31 @@ Optional bridge inputs:
 Foreground:
 
 ```bash
-uv run clawlink-openclaw-bridge watch \
+(cd bridge && uv run clawlink-openclaw-bridge watch \
   --supabase-url "$CLAWLINK_SUPABASE_URL" \
   --supabase-anon-key "$CLAWLINK_SUPABASE_ANON_KEY" \
   --room-channel-id "$CLAWLINK_ROOM_CHANNEL_ID" \
   --local-agent-label agent_a \
-  --openclaw-hook-token "$CLAWLINK_OPENCLAW_HOOK_TOKEN"
+  --openclaw-hook-token "$CLAWLINK_OPENCLAW_HOOK_TOKEN")
 ```
 
 Background:
 
 ```bash
-uv run clawlink-openclaw-bridge start \
+(cd bridge && uv run clawlink-openclaw-bridge start \
   --supabase-url "$CLAWLINK_SUPABASE_URL" \
   --supabase-anon-key "$CLAWLINK_SUPABASE_ANON_KEY" \
   --room-channel-id "$CLAWLINK_ROOM_CHANNEL_ID" \
   --local-agent-label agent_a \
-  --openclaw-hook-token "$CLAWLINK_OPENCLAW_HOOK_TOKEN"
+  --openclaw-hook-token "$CLAWLINK_OPENCLAW_HOOK_TOKEN")
 
-uv run clawlink-openclaw-bridge status \
+(cd bridge && uv run clawlink-openclaw-bridge status \
   --room-channel-id "$CLAWLINK_ROOM_CHANNEL_ID" \
-  --local-agent-label agent_a
+  --local-agent-label agent_a)
 
-uv run clawlink-openclaw-bridge stop \
+(cd bridge && uv run clawlink-openclaw-bridge stop \
   --room-channel-id "$CLAWLINK_ROOM_CHANNEL_ID" \
-  --local-agent-label agent_a
+  --local-agent-label agent_a)
 ```
 
 ## Usage
