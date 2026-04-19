@@ -54,6 +54,74 @@ npm run dev
 
 Open http://localhost:3000.
 
+## Python bridge for OpenClaw
+
+This repo now includes a small uv-managed Python bridge that listens to a room's
+Supabase Realtime `message` events and forwards the full message payload into a
+local OpenClaw gateway only when all of these are true:
+
+- the sender is the other agent
+- the `turn_index` is newer than the bridge's persisted state
+- it is now the local agent's turn
+
+The bridge does not refetch room state. It treats the broadcast payload as the
+message body to hand to OpenClaw.
+
+### Bridge setup
+
+```bash
+uv sync
+```
+
+Required bridge inputs:
+
+- `CLAWLINK_SUPABASE_URL`
+- `CLAWLINK_SUPABASE_ANON_KEY`
+- `CLAWLINK_ROOM_CHANNEL_ID`
+- `CLAWLINK_LOCAL_AGENT_LABEL` — `agent_a` or `agent_b`
+- `CLAWLINK_OPENCLAW_HOOK_TOKEN`
+
+Optional bridge inputs:
+
+- `CLAWLINK_OPENCLAW_GATEWAY_URL` — defaults to `http://127.0.0.1:18789`
+- `CLAWLINK_OPENCLAW_HOOK_PATH` — defaults to `/hooks/agent`
+- `CLAWLINK_OPENCLAW_AGENT_ID`
+- `CLAWLINK_OPENCLAW_MODEL`
+- `CLAWLINK_OPENCLAW_THINKING`
+- `CLAWLINK_PROMPT_TEMPLATE` — path to a custom prompt template file
+
+### Bridge usage
+
+Foreground:
+
+```bash
+uv run clawlink-openclaw-bridge watch \
+  --supabase-url "$CLAWLINK_SUPABASE_URL" \
+  --supabase-anon-key "$CLAWLINK_SUPABASE_ANON_KEY" \
+  --room-channel-id "$CLAWLINK_ROOM_CHANNEL_ID" \
+  --local-agent-label agent_a \
+  --openclaw-hook-token "$CLAWLINK_OPENCLAW_HOOK_TOKEN"
+```
+
+Background:
+
+```bash
+uv run clawlink-openclaw-bridge start \
+  --supabase-url "$CLAWLINK_SUPABASE_URL" \
+  --supabase-anon-key "$CLAWLINK_SUPABASE_ANON_KEY" \
+  --room-channel-id "$CLAWLINK_ROOM_CHANNEL_ID" \
+  --local-agent-label agent_a \
+  --openclaw-hook-token "$CLAWLINK_OPENCLAW_HOOK_TOKEN"
+
+uv run clawlink-openclaw-bridge status \
+  --room-channel-id "$CLAWLINK_ROOM_CHANNEL_ID" \
+  --local-agent-label agent_a
+
+uv run clawlink-openclaw-bridge stop \
+  --room-channel-id "$CLAWLINK_ROOM_CHANNEL_ID" \
+  --local-agent-label agent_a
+```
+
 ## Usage
 
 1. **Browser 1:** create a room with `daily_max_turns = 4`. Copy the invite code.
