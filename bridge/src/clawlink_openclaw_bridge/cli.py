@@ -22,7 +22,9 @@ LOGGER = logging.getLogger("clawlink-openclaw-bridge")
 
 ENV_PREFIX = "CLAWLINK_"
 DEFAULT_GATEWAY_URL = "http://127.0.0.1:18789"
+DEFAULT_OPENCLAW_DISPATCH_MODE = "agent-hook"
 DEFAULT_OPENCLAW_HOOK_PATH = "/hooks/agent"
+DEFAULT_OPENCLAW_WAKE_PATH = "/hooks/wake"
 DEFAULT_OPENCLAW_NAME = "ClawLink"
 
 DEFAULT_PROMPT_TEMPLATE = """ClawLink delivered a verified inbound turn.
@@ -54,7 +56,9 @@ class BridgeConfig:
     supabase_anon_key: str
     room_channel_id: str
     local_agent_label: str
+    openclaw_dispatch_mode: str
     openclaw_agent_hook_url: str
+    openclaw_wake_hook_url: str
     openclaw_hook_token: str
     openclaw_name: str
     openclaw_agent_id: Optional[str]
@@ -379,6 +383,13 @@ class BridgeApp:
             return True
 
     async def _dispatch_to_openclaw(self, event: MessageEvent) -> None:
+        if self.config.openclaw_dispatch_mode == "main-session":
+            await self._dispatch_to_main_session(event)
+            return
+
+        await self._dispatch_to_agent_hook(event)
+
+    async def _dispatch_to_agent_hook(self, event: MessageEvent) -> None:
         message = self._render_prompt(event)
         payload: Dict[str, Any] = {
             "message": message,
@@ -408,6 +419,26 @@ class BridgeApp:
             )
             response.raise_for_status()
             LOGGER.debug("OpenClaw response: %s", response.text)
+
+    async def _dispatch_to_main_session(self, event: MessageEvent) -> None:
+        message = self._render_prompt(event)
+        payload = {
+            "text": message,
+            "mode": "now",
+        }
+        headers = {
+            "Authorization": f"Bearer {self.config.openclaw_hook_token}",
+            "Content-Type": "application/json",
+        }
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(
+                self.config.openclaw_wake_hook_url,
+                headers=headers,
+                json=payload,
+            )
+            response.raise_for_status()
+            LOGGER.debug("OpenClaw wake response: %s", response.text)
 
     def _render_prompt(self, event: MessageEvent) -> str:
         template_data = {
@@ -455,6 +486,18 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Which side this bridge represents. Env: {env_name('LOCAL_AGENT_LABEL')}",
     )
     common.add_argument(
+        "--openclaw-dispatch-mode",
+        choices=["agent-hook", "main-session"],
+        default=os.environ.get(
+            env_name("OPENCLAW_DISPATCH_MODE"),
+            DEFAULT_OPENCLAW_DISPATCH_MODE,
+        ),
+        help=(
+            "How to wake OpenClaw: isolated /hooks/agent run or main-session /hooks/wake. "
+            f"Env: {env_name('OPENCLAW_DISPATCH_MODE')}"
+        ),
+    )
+    common.add_argument(
         "--openclaw-gateway-url",
         default=os.environ.get(env_name("OPENCLAW_GATEWAY_URL"), DEFAULT_GATEWAY_URL),
         help=f"Base URL for the local OpenClaw gateway. Env: {env_name('OPENCLAW_GATEWAY_URL')}",
@@ -463,6 +506,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--openclaw-hook-path",
         default=os.environ.get(env_name("OPENCLAW_HOOK_PATH"), DEFAULT_OPENCLAW_HOOK_PATH),
         help=f"OpenClaw hook path for agent ingress. Env: {env_name('OPENCLAW_HOOK_PATH')}",
+    )
+    common.add_argument(
+        "--openclaw-wake-path",
+        default=os.environ.get(env_name("OPENCLAW_WAKE_PATH"), DEFAULT_OPENCLAW_WAKE_PATH),
+        help=f"OpenClaw wake path for main-session ingress. Env: {env_name('OPENCLAW_WAKE_PATH')}",
     )
     common.add_argument(
         "--openclaw-hook-token",
@@ -573,13 +621,16 @@ def resolve_config(args: argparse.Namespace) -> BridgeConfig:
     runtime_paths = resolve_runtime_paths(args)
 
     hook_url = args.openclaw_gateway_url.rstrip("/") + "/" + args.openclaw_hook_path.lstrip("/")
+    wake_url = args.openclaw_gateway_url.rstrip("/") + "/" + args.openclaw_wake_path.lstrip("/")
 
     return BridgeConfig(
         supabase_url=require_value(args.supabase_url, "--supabase-url"),
         supabase_anon_key=require_value(args.supabase_anon_key, "--supabase-anon-key"),
         room_channel_id=room_channel_id,
         local_agent_label=local_agent_label,
+        openclaw_dispatch_mode=args.openclaw_dispatch_mode,
         openclaw_agent_hook_url=hook_url,
+        openclaw_wake_hook_url=wake_url,
         openclaw_hook_token=require_value(args.openclaw_hook_token, "--openclaw-hook-token"),
         openclaw_name=args.openclaw_name,
         openclaw_agent_id=args.openclaw_agent_id,
@@ -774,8 +825,10 @@ def build_watch_env(config: BridgeConfig) -> dict[str, str]:
             env_name("SUPABASE_ANON_KEY"): config.supabase_anon_key,
             env_name("ROOM_CHANNEL_ID"): config.room_channel_id,
             env_name("LOCAL_AGENT_LABEL"): config.local_agent_label,
+            env_name("OPENCLAW_DISPATCH_MODE"): config.openclaw_dispatch_mode,
             env_name("OPENCLAW_GATEWAY_URL"): parent_url(config.openclaw_agent_hook_url),
             env_name("OPENCLAW_HOOK_PATH"): hook_path(config.openclaw_agent_hook_url),
+            env_name("OPENCLAW_WAKE_PATH"): hook_path(config.openclaw_wake_hook_url),
             env_name("OPENCLAW_HOOK_TOKEN"): config.openclaw_hook_token,
             env_name("OPENCLAW_NAME"): config.openclaw_name,
         }
