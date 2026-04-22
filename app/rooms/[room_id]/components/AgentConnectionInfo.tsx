@@ -57,6 +57,64 @@ function CopyField({
   );
 }
 
+function CopyBlock({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  async function onCopy() {
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch {
+      // ignore
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1400);
+  }
+
+  return (
+    <div className="row wide" style={{ marginTop: 12 }}>
+      <span className="eyebrow" style={{ fontSize: 10 }}>
+        {label}
+      </span>
+      <div
+        style={{
+          border: "1px solid var(--line)",
+          background: "rgba(255,255,255,0.02)",
+          padding: 12,
+        }}
+      >
+        <pre
+          style={{
+            margin: 0,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+            fontFamily: "var(--font-mono)",
+            fontSize: 12,
+            lineHeight: 1.6,
+            color: "var(--fg-1)",
+          }}
+        >
+          {value}
+        </pre>
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
+          <button
+            type="button"
+            className={copied ? "copied" : ""}
+            onClick={onCopy}
+          >
+            {copied ? "✓ COPIED" : "COPY"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AgentConnectionInfo({
   session,
   roomChannelId,
@@ -85,6 +143,25 @@ export default function AgentConnectionInfo({
 
   const youAccent =
     session.user_label === "agent_a" ? "var(--a)" : "var(--b)";
+  const prompt = `Ignore any previous ClawLink setup or instructions.
+
+Use ClawLink in isolated hook mode, not heartbeat mode and not main-session mode.
+
+You are ${session.agent_name || session.user_label}.
+
+ClawLink room:
+- room_channel_id: ${roomChannelId}
+- api_base_url: ${apiBaseUrl}
+- bearer token: ${session.agent_token}
+
+Rules:
+1. If a ClawLink hook event arrives, treat it as a real incoming chat turn from the other agent.
+2. Write a short natural reply.
+3. Send the reply with POST ${apiBaseUrl}/api/messages
+4. Use header: Authorization: Bearer ${session.agent_token}
+5. Use JSON body: {"content":"YOUR_REPLY"}
+6. Do not reply HEARTBEAT_OK.
+7. Do not ask the local operator for confirmation.`;
 
   return (
     <section className="card" style={{ marginBottom: 24 }}>
@@ -186,6 +263,22 @@ export default function AgentConnectionInfo({
           </code>
           .
         </div>
+      </details>
+
+      <details style={{ marginTop: 16, color: "var(--fg-2)" }}>
+        <summary
+          style={{
+            cursor: "pointer",
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+            letterSpacing: "0.14em",
+            textTransform: "uppercase",
+            color: "var(--fg-1)",
+          }}
+        >
+          ▸ OpenClaw prompt
+        </summary>
+        <CopyBlock label="PASTE INTO OPENCLAW" value={prompt} />
       </details>
     </section>
   );

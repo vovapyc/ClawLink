@@ -45,6 +45,9 @@ Room metadata:
 Message body:
 {content}
 
+Reply instructions:
+{delivery_instructions}
+
 Raw payload:
 {message_json}
 """
@@ -54,6 +57,8 @@ Raw payload:
 class BridgeConfig:
     supabase_url: str
     supabase_anon_key: str
+    clawlink_api_base_url: Optional[str]
+    clawlink_agent_token: Optional[str]
     room_channel_id: str
     local_agent_label: str
     openclaw_dispatch_mode: str
@@ -442,6 +447,7 @@ class BridgeApp:
 
     def _render_prompt(self, event: MessageEvent) -> str:
         template_data = {
+            "delivery_instructions": self._build_delivery_instructions(),
             "message_id": event.message_id,
             "room_id": event.room_id,
             "room_channel_id": event.room_channel_id,
@@ -454,6 +460,25 @@ class BridgeApp:
             "message_json": json.dumps(event.raw_payload, ensure_ascii=False, indent=2, sort_keys=True),
         }
         return self.prompt_template.format(**template_data)
+
+    def _build_delivery_instructions(self) -> str:
+        if not self.config.clawlink_api_base_url or not self.config.clawlink_agent_token:
+            return (
+                "Reply to the other agent normally. "
+                "Bridge delivery credentials were not configured, so ask the operator to wire in "
+                "CLAWLINK_API_BASE_URL and CLAWLINK_AGENT_TOKEN if you need to post automatically."
+            )
+
+        api_base = self.config.clawlink_api_base_url.rstrip("/")
+        example_body = json.dumps({"content": "YOUR_REPLY_HERE"})
+        return (
+            "You should answer the other ClawLink agent, not the local operator. "
+            "Write a concise reply to the message body above, then send it back to ClawLink with "
+            f"an HTTP POST to {api_base}/api/messages using Authorization: Bearer "
+            f"{self.config.clawlink_agent_token}. "
+            "The JSON body must contain only a single field named content. "
+            f"Example body: {example_body}"
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -473,6 +498,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--supabase-anon-key",
         default=os.environ.get(env_name("SUPABASE_ANON_KEY")),
         help=f"Supabase anon key. Env: {env_name('SUPABASE_ANON_KEY')}",
+    )
+    common.add_argument(
+        "--api-base-url",
+        default=os.environ.get(env_name("API_BASE_URL")),
+        help=f"ClawLink API base URL for posting replies. Env: {env_name('API_BASE_URL')}",
+    )
+    common.add_argument(
+        "--agent-token",
+        default=os.environ.get(env_name("AGENT_TOKEN")),
+        help=f"ClawLink agent bearer token for posting replies. Env: {env_name('AGENT_TOKEN')}",
     )
     common.add_argument(
         "--room-channel-id",
@@ -626,6 +661,8 @@ def resolve_config(args: argparse.Namespace) -> BridgeConfig:
     return BridgeConfig(
         supabase_url=require_value(args.supabase_url, "--supabase-url"),
         supabase_anon_key=require_value(args.supabase_anon_key, "--supabase-anon-key"),
+        clawlink_api_base_url=args.api_base_url,
+        clawlink_agent_token=args.agent_token,
         room_channel_id=room_channel_id,
         local_agent_label=local_agent_label,
         openclaw_dispatch_mode=args.openclaw_dispatch_mode,
@@ -823,6 +860,8 @@ def build_watch_env(config: BridgeConfig) -> dict[str, str]:
         {
             env_name("SUPABASE_URL"): config.supabase_url,
             env_name("SUPABASE_ANON_KEY"): config.supabase_anon_key,
+            env_name("API_BASE_URL"): config.clawlink_api_base_url or "",
+            env_name("AGENT_TOKEN"): config.clawlink_agent_token or "",
             env_name("ROOM_CHANNEL_ID"): config.room_channel_id,
             env_name("LOCAL_AGENT_LABEL"): config.local_agent_label,
             env_name("OPENCLAW_DISPATCH_MODE"): config.openclaw_dispatch_mode,

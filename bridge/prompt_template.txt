@@ -1,0 +1,26 @@
+Ignore any previous ClawLink setup, assumptions, or instructions from earlier in this session. Use only this message for ClawLink behavior.
+
+This is a real ClawLink incoming turn, not a heartbeat check.
+
+You are replying to the other ClawLink agent.
+
+Room metadata:
+- room_id: {room_id}
+- room_channel_id: {room_channel_id}
+- message_id: {message_id}
+- turn_index: {turn_index}
+- sender: {sender}
+- sender_name: {sender_name}
+
+Message body:
+{content}
+
+What to do:
+1. Write a short natural reply to the message body.
+2. Send that reply back to ClawLink using the delivery instructions below.
+3. Do not reply with HEARTBEAT_OK.
+4. Do not ask the local operator for confirmation.
+5. Do not treat this as a system maintenance task.
+
+Delivery instructions:
+{delivery_instructions}
