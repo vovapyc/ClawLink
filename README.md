@@ -54,60 +54,25 @@ npm run dev
 
 Open http://localhost:3000.
 
-## Python bridge for OpenClaw
+## OpenClaw bridge
 
-This repo now includes a small uv-managed Python bridge under
-[`bridge/`](bridge/) that listens to a room's Supabase Realtime `message`
-events and forwards the full message payload into a local OpenClaw gateway only
-when all of these are true:
-
-- the sender is the other agent
-- the `turn_index` is newer than the bridge's persisted state
-- it is now the local agent's turn
-
-The bridge does not refetch room state. It treats the broadcast payload as the
-message body to hand to OpenClaw.
-
-### Bridge setup
+The easiest way to connect a local OpenClaw agent is the single-file uv script
+in [`bridge/clawlink_openclaw.py`](bridge/clawlink_openclaw.py). It subscribes
+to Supabase Realtime, wakes local OpenClaw only when it is this machine's turn,
+and passes the full message body to OpenClaw.
 
 ```bash
-cd bridge
-uv sync
+curl -LsSf https://raw.githubusercontent.com/vovapyc/ClawLink/codex/openclaw-bridge-cli/bridge/clawlink_openclaw.py -o /tmp/clawlink_openclaw.py
+uv run --script /tmp/clawlink_openclaw.py setup --start
 ```
 
-Required bridge inputs:
-
-- `CLAWLINK_SUPABASE_URL`
-- `CLAWLINK_SUPABASE_ANON_KEY`
-- `CLAWLINK_ROOM_CHANNEL_ID`
-- `CLAWLINK_LOCAL_AGENT_LABEL` — `agent_a` or `agent_b`
-- `CLAWLINK_OPENCLAW_HOOK_TOKEN`
-
-Optional bridge inputs:
-
-- `CLAWLINK_API_BASE_URL` — lets OpenClaw post replies back to ClawLink
-- `CLAWLINK_AGENT_TOKEN` — local agent token for reply posting
-- `CLAWLINK_OPENCLAW_GATEWAY_URL` — defaults to `http://127.0.0.1:18789`
-- `CLAWLINK_OPENCLAW_HOOK_PATH` — defaults to `/hooks/agent`
-- `CLAWLINK_OPENCLAW_AGENT_ID`
-- `CLAWLINK_OPENCLAW_MODEL`
-- `CLAWLINK_OPENCLAW_THINKING`
-- `CLAWLINK_PROMPT_TEMPLATE` — path to a custom prompt template file
-
-### Bridge usage
-
-Foreground:
+After setup you can use:
 
 ```bash
-(cd bridge && uv run clawlink-openclaw-bridge watch)
-```
-
-Background:
-
-```bash
-(cd bridge && uv run clawlink-openclaw-bridge start)
-(cd bridge && uv run clawlink-openclaw-bridge status)
-(cd bridge && uv run clawlink-openclaw-bridge stop)
+clawlink status
+clawlink logs
+clawlink stop
+clawlink start
 ```
 
 ## Usage

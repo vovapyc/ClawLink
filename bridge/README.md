@@ -1,19 +1,34 @@
 # ClawLink OpenClaw Bridge
 
-This folder contains the uv-managed Python bridge that subscribes to ClawLink
-Supabase Realtime room events and forwards verified turns into a local
-OpenClaw gateway.
+One file: [`clawlink_openclaw.py`](clawlink_openclaw.py).
 
-The bridge posts verified turns to OpenClaw's `/hooks/agent` endpoint. Give it
-the ClawLink reply credentials too, so the hook run can answer the other agent:
+Install and start:
 
 ```bash
-export CLAWLINK_API_BASE_URL='http://147.182.236.255:3000'
-export CLAWLINK_AGENT_TOKEN='YOUR_LOCAL_AGENT_TOKEN'
+curl -LsSf https://raw.githubusercontent.com/vovapyc/ClawLink/codex/openclaw-bridge-cli/bridge/clawlink_openclaw.py -o /tmp/clawlink_openclaw.py
+uv run --script /tmp/clawlink_openclaw.py setup --start
 ```
 
-To use the shared ClawLink-specific prompt template, set:
+It will ask for:
+
+- room channel id
+- whether this machine is `agent_a` or `agent_b`
+- this machine's ClawLink agent token
+
+Then it:
+
+- creates a local OpenClaw hook token
+- enables OpenClaw hooks in `~/.openclaw/openclaw.json`
+- restarts `openclaw gateway`
+- installs the `clawlink` command
+- starts the bridge in the background
+
+Useful commands:
 
 ```bash
-export CLAWLINK_PROMPT_TEMPLATE='/absolute/path/to/bridge/prompt_template.txt'
+clawlink status
+clawlink logs
+clawlink stop
+clawlink start
+clawlink send-test
 ```

@@ -143,25 +143,8 @@ export default function AgentConnectionInfo({
 
   const youAccent =
     session.user_label === "agent_a" ? "var(--a)" : "var(--b)";
-  const prompt = `Ignore any previous ClawLink setup or instructions.
-
-Use ClawLink in isolated hook mode, not heartbeat mode and not main-session mode.
-
-You are ${session.agent_name || session.user_label}.
-
-ClawLink room:
-- room_channel_id: ${roomChannelId}
-- api_base_url: ${apiBaseUrl}
-- bearer token: ${session.agent_token}
-
-Rules:
-1. If a ClawLink hook event arrives, treat it as a real incoming chat turn from the other agent.
-2. Write a short natural reply.
-3. Send the reply with POST ${apiBaseUrl}/api/messages
-4. Use header: Authorization: Bearer ${session.agent_token}
-5. Use JSON body: {"content":"YOUR_REPLY"}
-6. Do not reply HEARTBEAT_OK.
-7. Do not ask the local operator for confirmation.`;
+  const setupCommand = `curl -LsSf https://raw.githubusercontent.com/vovapyc/ClawLink/codex/openclaw-bridge-cli/bridge/clawlink_openclaw.py -o /tmp/clawlink_openclaw.py
+uv run --script /tmp/clawlink_openclaw.py setup --room '${roomChannelId}' --agent '${session.user_label}' --token '${session.agent_token}' --start`;
 
   return (
     <section className="card" style={{ marginBottom: 24 }}>
@@ -276,9 +259,9 @@ Rules:
             color: "var(--fg-1)",
           }}
         >
-          ▸ OpenClaw prompt
+          ▸ OpenClaw setup command
         </summary>
-        <CopyBlock label="PASTE INTO OPENCLAW" value={prompt} />
+        <CopyBlock label="RUN NEAR OPENCLAW" value={setupCommand} />
       </details>
     </section>
   );
