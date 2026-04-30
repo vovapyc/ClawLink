@@ -29,15 +29,7 @@ from supabase import acreate_client
 
 APP = typer.Typer(no_args_is_help=True, help="Tiny ClawLink -> OpenClaw bridge.")
 
-SUPABASE_URL = "https://dqjfciervdlpfzbsoexc.supabase.co"
-SUPABASE_KEY = (
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
-    "eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRxamZjaWVydmRscGZ6YnNvZXhjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MDAwMDEsImV4cCI6MjA5MTk3NjAwMX0."
-    "TKcdfTCX_ZTRdeLpZHRSe3PXML-lNCQmFn06aK-6suw"
-)
-API_BASE = "http://147.182.236.255:3000"
-OPENCLAW_GATEWAY = "http://127.0.0.1:18789"
-OPENCLAW_MODEL = "openai-codex/gpt-5.4"
+DEFAULT_GATEWAY = "http://127.0.0.1:18789"
 
 
 def app_dir(kind: str) -> Path:
@@ -79,6 +71,24 @@ def cfg() -> dict[str, str]:
     data = read_json(CONFIG, None)
     if not data:
         raise typer.BadParameter("No setup yet. Run: clawlink setup")
+    missing = [
+        key
+        for key in (
+            "room",
+            "agent",
+            "token",
+            "hook_token",
+            "supabase_url",
+            "supabase_key",
+            "api_base",
+            "gateway",
+        )
+        if not data.get(key)
+    ]
+    if missing:
+        raise typer.BadParameter(
+            f"Missing config values: {', '.join(missing)}. Run setup again."
+        )
     return data
 
 
@@ -150,7 +160,7 @@ Message:
 {message["content"]}
 
 Send the reply with:
-POST {API_BASE}/api/messages
+POST {config["api_base"]}/api/messages
 Authorization: Bearer {config["token"]}
 JSON: {{"content": "YOUR_REPLY"}}
 """
@@ -163,11 +173,12 @@ async def forward(config: dict[str, str], message: dict[str, Any]) -> None:
         "wakeMode": "now",
         "deliver": False,
         "agentId": "main",
-        "model": OPENCLAW_MODEL,
     }
+    if config.get("model"):
+        payload["model"] = config["model"]
     headers = {"Authorization": f"Bearer {config['hook_token']}"}
     async with httpx.AsyncClient(timeout=30) as client:
-        url = f"{OPENCLAW_GATEWAY}/hooks/agent"
+        url = f"{config['gateway'].rstrip('/')}/hooks/agent"
         response = await client.post(url, headers=headers, json=payload)
         response.raise_for_status()
     write_json(SEEN, {"turn_index": message["turn_index"], "id": message["id"]})
@@ -202,7 +213,7 @@ async def watch_forever() -> None:
         except NotImplementedError:
             signal.signal(sig, stop_now)
 
-    client = await acreate_client(SUPABASE_URL, SUPABASE_KEY)
+    client = await acreate_client(config["supabase_url"], config["supabase_key"])
     channel = client.channel(config["room"])
     subscribed = asyncio.get_running_loop().create_future()
 
@@ -246,6 +257,11 @@ def setup(
     token: str = typer.Option(
         ..., prompt="This machine's agent token", hide_input=True
     ),
+    supabase_url: str = typer.Option(..., prompt="Supabase URL"),
+    supabase_key: str = typer.Option(..., prompt="Supabase anon key", hide_input=True),
+    api_base: str = typer.Option(..., prompt="ClawLink API base URL"),
+    gateway: str = typer.Option(DEFAULT_GATEWAY, help="Local OpenClaw gateway URL."),
+    model: str | None = typer.Option(None, help="Optional OpenClaw model override."),
     hook_token: str | None = typer.Option(None, help="Optional. Generated if omitted."),
     start_now: bool = typer.Option(
         False, "--start/--no-start", help="Start after setup."
@@ -259,7 +275,18 @@ def setup(
     install_self()
     configure_openclaw(hook_token)
     write_json(
-        CONFIG, {"room": room, "agent": agent, "token": token, "hook_token": hook_token}
+        CONFIG,
+        {
+            "room": room,
+            "agent": agent,
+            "token": token,
+            "hook_token": hook_token,
+            "supabase_url": supabase_url,
+            "supabase_key": supabase_key,
+            "api_base": api_base.rstrip("/"),
+            "gateway": gateway.rstrip("/"),
+            "model": model or "",
+        },
     )
 
     typer.echo(f"installed: {SCRIPT}")
@@ -345,7 +372,7 @@ def send_test(
 ) -> None:
     """Send one test message as the other agent."""
     response = httpx.post(
-        f"{API_BASE}/api/messages",
+        f"{cfg()['api_base']}/api/messages",
         headers={"Authorization": f"Bearer {token}"},
         json={"content": message},
         timeout=30,

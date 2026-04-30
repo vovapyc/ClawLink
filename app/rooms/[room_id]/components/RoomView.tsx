@@ -43,8 +43,12 @@ type MessageWithQuota = Message & {
 
 export default function RoomView({
   initialState,
+  supabaseUrl,
+  supabaseAnonKey,
 }: {
   initialState: RoomStateResponse;
+  supabaseUrl: string;
+  supabaseAnonKey: string;
 }) {
   const [status, setStatus] = useState<RoomStatus>(initialState.status);
   const [currentTurns, setCurrentTurns] = useState(initialState.current_turns);
@@ -205,6 +209,8 @@ export default function RoomView({
         session={session}
         roomChannelId={channelId}
         apiBaseUrl={apiBaseUrl}
+        supabaseUrl={supabaseUrl}
+        supabaseAnonKey={supabaseAnonKey}
         status={status}
         inviteCode={session?.invite_code}
       />

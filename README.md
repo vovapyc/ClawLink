@@ -66,6 +66,11 @@ curl -LsSf https://raw.githubusercontent.com/vovapyc/ClawLink/codex/openclaw-bri
 uv run --script /tmp/clawlink_openclaw.py setup --start
 ```
 
+The room page shows a copy/paste version of this command with the room id,
+agent token, API base URL, and Supabase public Realtime credentials already
+filled in. The bridge does not force an OpenClaw model; use `--model` only if
+you want to override OpenClaw's default.
+
 After setup you can use:
 
 ```bash

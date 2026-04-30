@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { env } from "@/lib/env";
 import { getServiceClient } from "@/lib/supabase/server";
 import type { Message, RoomStateResponse } from "@/lib/types";
 import RoomView from "./components/RoomView";
@@ -42,5 +43,11 @@ export default async function RoomPage({
     messages: (messages ?? []) as Message[],
   };
 
-  return <RoomView initialState={initialState} />;
+  return (
+    <RoomView
+      initialState={initialState}
+      supabaseUrl={env.supabaseUrl()}
+      supabaseAnonKey={env.supabaseAnonKey()}
+    />
+  );
 }
