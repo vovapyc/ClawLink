@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import asyncio
 import json
 import logging
@@ -11,20 +10,20 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import httpx
+import typer
 from realtime import RealtimeSubscribeStates
 from supabase import acreate_client
 
 
 LOGGER = logging.getLogger("clawlink-openclaw-bridge")
+app = typer.Typer(no_args_is_help=True)
 
 ENV_PREFIX = "CLAWLINK_"
 DEFAULT_GATEWAY_URL = "http://127.0.0.1:18789"
-DEFAULT_OPENCLAW_DISPATCH_MODE = "agent-hook"
-DEFAULT_OPENCLAW_HOOK_PATH = "/hooks/agent"
-DEFAULT_OPENCLAW_WAKE_PATH = "/hooks/wake"
+DEFAULT_HOOK_PATH = "/hooks/agent"
 DEFAULT_OPENCLAW_NAME = "ClawLink"
 
 DEFAULT_PROMPT_TEMPLATE = """ClawLink delivered a verified inbound turn.
@@ -54,34 +53,59 @@ Raw payload:
 
 
 @dataclass(frozen=True)
-class BridgeConfig:
-    supabase_url: str
-    supabase_anon_key: str
-    clawlink_api_base_url: Optional[str]
-    clawlink_agent_token: Optional[str]
-    room_channel_id: str
-    local_agent_label: str
-    openclaw_dispatch_mode: str
-    openclaw_agent_hook_url: str
-    openclaw_wake_hook_url: str
-    openclaw_hook_token: str
+class Config:
+    supabase_url: Optional[str]
+    supabase_anon_key: Optional[str]
+    api_base_url: Optional[str]
+    agent_token: Optional[str]
+    room_channel_id: Optional[str]
+    local_agent_label: Optional[str]
+    openclaw_gateway_url: str
+    openclaw_hook_path: str
+    openclaw_hook_token: Optional[str]
     openclaw_name: str
     openclaw_agent_id: Optional[str]
     openclaw_model: Optional[str]
     openclaw_thinking: Optional[str]
     openclaw_timeout_seconds: Optional[int]
     prompt_template_path: Optional[Path]
-    state_file: Path
-    pid_file: Path
-    log_file: Path
+    state_file: Optional[Path]
+    pid_file: Optional[Path]
+    log_file: Optional[Path]
     log_level: str
 
+    def require_watch_values(self) -> None:
+        require(self.supabase_url, "--supabase-url")
+        require(self.supabase_anon_key, "--supabase-anon-key")
+        require(self.room_channel_id, "--room-channel-id")
+        require(self.local_agent_label, "--local-agent-label")
+        require(self.openclaw_hook_token, "--openclaw-hook-token")
+        self.require_valid_agent_label()
 
-@dataclass(frozen=True)
-class RuntimePaths:
-    state_file: Path
-    pid_file: Path
-    log_file: Path
+    def require_runtime_values(self) -> None:
+        require(self.room_channel_id, "--room-channel-id")
+        require(self.local_agent_label, "--local-agent-label")
+        self.require_valid_agent_label()
+
+    def require_valid_agent_label(self) -> None:
+        if self.local_agent_label not in {"agent_a", "agent_b"}:
+            raise typer.BadParameter("--local-agent-label must be agent_a or agent_b")
+
+    @property
+    def hook_url(self) -> str:
+        return join_url(self.openclaw_gateway_url, self.openclaw_hook_path)
+
+    @property
+    def state_path(self) -> Path:
+        return self.state_file or runtime_path(self.room_channel_id, self.local_agent_label, "state.json")
+
+    @property
+    def pid_path(self) -> Path:
+        return self.pid_file or runtime_path(self.room_channel_id, self.local_agent_label, "pid")
+
+    @property
+    def log_path(self) -> Path:
+        return self.log_file or runtime_path(self.room_channel_id, self.local_agent_label, "log")
 
 
 @dataclass(frozen=True)
@@ -94,53 +118,49 @@ class MessageEvent:
     content: str
     turn_index: int
     created_at: Optional[str]
-    raw_payload: Dict[str, Any]
+    raw_payload: dict[str, Any]
 
 
 def env_name(suffix: str) -> str:
     return f"{ENV_PREFIX}{suffix}"
 
 
-def default_runtime_dir() -> Path:
+def runtime_dir() -> Path:
     state_home = os.environ.get("XDG_STATE_HOME")
     if state_home:
         return Path(state_home).expanduser() / "clawlink-openclaw-bridge"
     return Path.home() / ".local" / "state" / "clawlink-openclaw-bridge"
 
 
-def sanitize_fragment(value: str) -> str:
+def runtime_path(room_channel_id: Optional[str], local_agent_label: Optional[str], suffix: str) -> Path:
+    slug = sanitize(f"{room_channel_id or 'room'}-{local_agent_label or 'agent'}")
+    return runtime_dir() / f"{slug}.{suffix}"
+
+
+def sanitize(value: str) -> str:
     cleaned = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in value)
-    cleaned = cleaned.strip("-")
-    return cleaned or "room"
+    return cleaned.strip("-") or "room"
 
 
-def default_pid_file(room_channel_id: str, local_agent_label: str) -> Path:
-    slug = sanitize_fragment(f"{room_channel_id}-{local_agent_label}")
-    return default_runtime_dir() / f"{slug}.pid"
+def join_url(base: str, path: str) -> str:
+    return base.rstrip("/") + "/" + path.lstrip("/")
 
 
-def default_log_file(room_channel_id: str, local_agent_label: str) -> Path:
-    slug = sanitize_fragment(f"{room_channel_id}-{local_agent_label}")
-    return default_runtime_dir() / f"{slug}.log"
+def require(value: Optional[str], name: str) -> str:
+    if not value:
+        raise typer.BadParameter(f"Missing required value for {name}")
+    return value
 
 
-def default_state_file(room_channel_id: str, local_agent_label: str) -> Path:
-    slug = sanitize_fragment(f"{room_channel_id}-{local_agent_label}")
-    return default_runtime_dir() / f"{slug}.state.json"
+def next_expected_sender(turn_index: int) -> str:
+    return "agent_a" if turn_index % 2 == 0 else "agent_b"
 
 
-def ensure_parent_dir(path: Path) -> None:
+def ensure_parent(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
 
-def atomic_write_json(path: Path, payload: Dict[str, Any]) -> None:
-    ensure_parent_dir(path)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-    tmp.replace(path)
-
-
-def load_json(path: Path) -> Dict[str, Any]:
+def read_json(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     try:
@@ -150,11 +170,23 @@ def load_json(path: Path) -> Dict[str, Any]:
         return {}
 
 
-def next_expected_sender(turn_index: int) -> str:
-    return "agent_a" if turn_index % 2 == 0 else "agent_b"
+def write_json(path: Path, payload: dict[str, Any]) -> None:
+    ensure_parent(path)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    tmp.replace(path)
 
 
-def is_pid_running(pid: int) -> bool:
+def read_pid(path: Path) -> Optional[int]:
+    if not path.exists():
+        return None
+    try:
+        return int(path.read_text(encoding="utf-8").strip())
+    except ValueError:
+        return None
+
+
+def pid_running(pid: int) -> bool:
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -164,70 +196,47 @@ def is_pid_running(pid: int) -> bool:
     return True
 
 
-class BridgeStateStore:
-    def __init__(self, path: Path) -> None:
-        self.path = path
-        self.payload = load_json(path)
+def configure_logging(level: str, log_file: Optional[Path] = None) -> None:
+    handler: logging.Handler
+    if log_file:
+        ensure_parent(log_file)
+        handler = logging.FileHandler(log_file, encoding="utf-8")
+    else:
+        handler = logging.StreamHandler()
 
-    def last_turn_index(self) -> int:
-        value = self.payload.get("last_turn_index")
-        return int(value) if isinstance(value, int) else 0
-
-    def last_message_id(self) -> Optional[str]:
-        value = self.payload.get("last_message_id")
-        return value if isinstance(value, str) else None
-
-    def update(self, event: MessageEvent) -> None:
-        self.payload = {
-            "room_channel_id": event.room_channel_id,
-            "room_id": event.room_id,
-            "last_turn_index": event.turn_index,
-            "last_message_id": event.message_id,
-            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        }
-        atomic_write_json(self.path, self.payload)
+    logging.basicConfig(
+        level=getattr(logging, level.upper()),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        handlers=[handler],
+        force=True,
+    )
 
 
-class PidFile:
-    def __init__(self, path: Path) -> None:
-        self.path = path
-
-    def write(self) -> None:
-        ensure_parent_dir(self.path)
-        self.path.write_text(str(os.getpid()), encoding="utf-8")
-
-    def remove(self) -> None:
-        try:
-            self.path.unlink()
-        except FileNotFoundError:
-            return
-
-
-class BridgeApp:
-    def __init__(self, config: BridgeConfig) -> None:
+class Bridge:
+    def __init__(self, config: Config) -> None:
         self.config = config
         self.stop_event = asyncio.Event()
         self.state_lock = asyncio.Lock()
-        self.state_store = BridgeStateStore(config.state_file)
-        self.inflight_message_ids: set[str] = set()
-        self.prompt_template = self._load_prompt_template()
-        self.pid_file = PidFile(config.pid_file)
+        self.inflight: set[str] = set()
+        self.state = read_json(config.state_path)
+        self.prompt_template = self.load_prompt_template()
 
-    def _load_prompt_template(self) -> str:
-        if self.config.prompt_template_path is None:
-            return DEFAULT_PROMPT_TEMPLATE
-        return self.config.prompt_template_path.read_text(encoding="utf-8")
+    def load_prompt_template(self) -> str:
+        if self.config.prompt_template_path:
+            return self.config.prompt_template_path.read_text(encoding="utf-8")
+        return DEFAULT_PROMPT_TEMPLATE
 
     async def run(self) -> int:
-        self.pid_file.write()
-        self._install_signal_handlers()
+        ensure_parent(self.config.pid_path)
+        self.config.pid_path.write_text(str(os.getpid()), encoding="utf-8")
+        self.install_signal_handlers()
         try:
-            await self._watch_forever()
+            await self.watch()
         finally:
-            self.pid_file.remove()
+            self.config.pid_path.unlink(missing_ok=True)
         return 0
 
-    def _install_signal_handlers(self) -> None:
+    def install_signal_handlers(self) -> None:
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
             try:
@@ -235,47 +244,31 @@ class BridgeApp:
             except NotImplementedError:
                 signal.signal(sig, lambda *_args: self.stop_event.set())
 
-    async def _watch_forever(self) -> None:
-        LOGGER.info(
-            "Watching Supabase channel %s as %s",
-            self.config.room_channel_id,
-            self.config.local_agent_label,
-        )
-        client = await acreate_client(
-            self.config.supabase_url,
-            self.config.supabase_anon_key,
-        )
-        channel = client.channel(self.config.room_channel_id)
-        subscribed_future: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+    async def watch(self) -> None:
+        LOGGER.info("Watching Supabase channel %s as %s", self.config.room_channel_id, self.config.local_agent_label)
+        client = await acreate_client(require(self.config.supabase_url, "--supabase-url"), require(self.config.supabase_anon_key, "--supabase-anon-key"))
+        channel = client.channel(require(self.config.room_channel_id, "--room-channel-id"))
+        subscribed = asyncio.get_running_loop().create_future()
 
         def on_subscribe(state: RealtimeSubscribeStates, error: Optional[Exception]) -> None:
+            state_name = getattr(state, "value", str(state))
             if state == RealtimeSubscribeStates.SUBSCRIBED:
                 LOGGER.info("Subscribed to Supabase Realtime channel %s", self.config.room_channel_id)
-                if not subscribed_future.done():
-                    subscribed_future.set_result(None)
+                if not subscribed.done():
+                    subscribed.set_result(None)
                 return
-            if subscribed_future.done():
-                if error is not None:
-                    LOGGER.error("Subscription state %s: %s", state.value, error)
-                else:
-                    LOGGER.warning("Subscription state changed: %s", state.value)
+            if subscribed.done():
+                log = LOGGER.error if error else LOGGER.warning
+                log("Subscription state changed: %s%s", state_name, f": {error}" if error else "")
                 return
+            subscribed.set_exception(RuntimeError(f"Supabase subscribe failed with {state_name}: {error or ''}".strip()))
 
-            if error is not None:
-                subscribed_future.set_exception(
-                    RuntimeError(f"Supabase subscribe failed with {state.value}: {error}")
-                )
-                return
-            subscribed_future.set_exception(
-                RuntimeError(f"Supabase subscribe failed with state {state.value}")
-            )
-
-        def on_broadcast(payload: Dict[str, Any]) -> None:
-            asyncio.create_task(self._handle_broadcast(payload))
+        def on_broadcast(envelope: dict[str, Any]) -> None:
+            asyncio.create_task(self.handle_broadcast(envelope))
 
         channel.on_broadcast("message", on_broadcast)
         await channel.subscribe(on_subscribe)
-        await subscribed_future
+        await subscribed
 
         try:
             await self.stop_event.wait()
@@ -283,43 +276,40 @@ class BridgeApp:
             await channel.unsubscribe()
             await client.remove_channel(channel)
 
-    async def _handle_broadcast(self, envelope: Dict[str, Any]) -> None:
-        event = self._parse_message_event(envelope)
-        if event is None:
+    async def handle_broadcast(self, envelope: dict[str, Any]) -> None:
+        event = self.parse_event(envelope)
+        if not event or not await self.should_dispatch(event):
             return
-
-        should_dispatch = await self._should_dispatch(event)
-        if not should_dispatch:
-            return
-
         try:
-            await self._dispatch_to_openclaw(event)
+            await self.dispatch(event)
         except Exception:
-            LOGGER.exception(
-                "Failed to forward turn %s (%s) to OpenClaw",
-                event.turn_index,
-                event.message_id,
-            )
-        else:
             async with self.state_lock:
-                self.state_store.update(event)
-                self.inflight_message_ids.discard(event.message_id)
-            LOGGER.info(
-                "Forwarded turn %s from %s to OpenClaw",
-                event.turn_index,
-                event.sender,
-            )
+                self.inflight.discard(event.message_id)
+            LOGGER.exception("Failed to forward turn %s (%s) to OpenClaw", event.turn_index, event.message_id)
+            return
 
-    def _parse_message_event(self, envelope: Dict[str, Any]) -> Optional[MessageEvent]:
+        async with self.state_lock:
+            self.state = {
+                "room_channel_id": event.room_channel_id,
+                "room_id": event.room_id,
+                "last_turn_index": event.turn_index,
+                "last_message_id": event.message_id,
+                "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            }
+            self.inflight.discard(event.message_id)
+            write_json(self.config.state_path, self.state)
+        LOGGER.info("Forwarded turn %s from %s to OpenClaw", event.turn_index, event.sender)
+
+    def parse_event(self, envelope: dict[str, Any]) -> Optional[MessageEvent]:
         payload = envelope.get("payload")
         if not isinstance(payload, dict):
             LOGGER.debug("Ignoring malformed broadcast envelope: %r", envelope)
             return None
 
         required = {"id", "room_id", "sender", "content", "turn_index"}
-        missing = [key for key in required if key not in payload]
+        missing = required.difference(payload)
         if missing:
-            LOGGER.debug("Ignoring payload missing required fields %s: %r", missing, payload)
+            LOGGER.debug("Ignoring payload missing required fields %s: %r", sorted(missing), payload)
             return None
 
         try:
@@ -333,12 +323,10 @@ class BridgeApp:
             LOGGER.debug("Ignoring payload with invalid sender: %r", payload)
             return None
 
-        room_channel_id = str(payload.get("room_channel_id") or self.config.room_channel_id)
-
         return MessageEvent(
             message_id=str(payload["id"]),
             room_id=str(payload["room_id"]),
-            room_channel_id=room_channel_id,
+            room_channel_id=str(payload.get("room_channel_id") or self.config.room_channel_id),
             sender=sender,
             sender_name=str(payload.get("sender_name") or ""),
             content=str(payload["content"]),
@@ -347,555 +335,250 @@ class BridgeApp:
             raw_payload=payload,
         )
 
-    async def _should_dispatch(self, event: MessageEvent) -> bool:
+    async def should_dispatch(self, event: MessageEvent) -> bool:
         async with self.state_lock:
+            last_turn = int(self.state.get("last_turn_index") or 0)
+            last_message = self.state.get("last_message_id")
+
             if event.sender == self.config.local_agent_label:
-                LOGGER.debug(
-                    "Ignoring turn %s because sender %s is local",
-                    event.turn_index,
-                    event.sender,
-                )
+                LOGGER.debug("Ignoring turn %s because sender %s is local", event.turn_index, event.sender)
                 return False
-
-            if event.turn_index <= self.state_store.last_turn_index():
-                LOGGER.debug(
-                    "Ignoring turn %s because last seen turn is %s",
-                    event.turn_index,
-                    self.state_store.last_turn_index(),
-                )
+            if event.turn_index <= last_turn:
+                LOGGER.debug("Ignoring turn %s because last seen turn is %s", event.turn_index, last_turn)
                 return False
-
-            if event.message_id == self.state_store.last_message_id():
-                LOGGER.debug(
-                    "Ignoring message %s because it already matched persisted state",
-                    event.message_id,
-                )
+            if event.message_id == last_message or event.message_id in self.inflight:
+                LOGGER.debug("Ignoring message %s because it is already handled", event.message_id)
                 return False
-
             if next_expected_sender(event.turn_index) != self.config.local_agent_label:
-                LOGGER.debug(
-                    "Ignoring turn %s because the next sender should not be %s",
-                    event.turn_index,
-                    self.config.local_agent_label,
-                )
+                LOGGER.debug("Ignoring turn %s because next sender is not %s", event.turn_index, self.config.local_agent_label)
                 return False
 
-            if event.message_id in self.inflight_message_ids:
-                LOGGER.debug("Ignoring message %s because it is already inflight", event.message_id)
-                return False
-
-            self.inflight_message_ids.add(event.message_id)
+            self.inflight.add(event.message_id)
             return True
 
-    async def _dispatch_to_openclaw(self, event: MessageEvent) -> None:
-        if self.config.openclaw_dispatch_mode == "main-session":
-            await self._dispatch_to_main_session(event)
-            return
-
-        await self._dispatch_to_agent_hook(event)
-
-    async def _dispatch_to_agent_hook(self, event: MessageEvent) -> None:
-        message = self._render_prompt(event)
-        payload: Dict[str, Any] = {
-            "message": message,
+    async def dispatch(self, event: MessageEvent) -> None:
+        prompt = self.render_prompt(event)
+        headers = {
+            "Authorization": f"Bearer {require(self.config.openclaw_hook_token, '--openclaw-hook-token')}",
+            "Content-Type": "application/json",
+        }
+        payload: dict[str, Any] = {
+            "message": prompt,
             "name": self.config.openclaw_name,
             "wakeMode": "now",
             "deliver": False,
         }
-        if self.config.openclaw_agent_id:
-            payload["agentId"] = self.config.openclaw_agent_id
-        if self.config.openclaw_model:
-            payload["model"] = self.config.openclaw_model
-        if self.config.openclaw_thinking:
-            payload["thinking"] = self.config.openclaw_thinking
-        if self.config.openclaw_timeout_seconds is not None:
-            payload["timeoutSeconds"] = self.config.openclaw_timeout_seconds
+        for key, value in {
+            "agentId": self.config.openclaw_agent_id,
+            "model": self.config.openclaw_model,
+            "thinking": self.config.openclaw_thinking,
+            "timeoutSeconds": self.config.openclaw_timeout_seconds,
+        }.items():
+            if value is not None:
+                payload[key] = value
+        await self.post_json(self.config.hook_url, headers, payload, "OpenClaw")
 
-        headers = {
-            "Authorization": f"Bearer {self.config.openclaw_hook_token}",
-            "Content-Type": "application/json",
-        }
-
+    async def post_json(self, url: str, headers: dict[str, str], payload: dict[str, Any], label: str) -> None:
         async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(
-                self.config.openclaw_agent_hook_url,
-                headers=headers,
-                json=payload,
-            )
+            response = await client.post(url, headers=headers, json=payload)
             response.raise_for_status()
-            LOGGER.debug("OpenClaw response: %s", response.text)
+            LOGGER.debug("%s response: %s", label, response.text)
 
-    async def _dispatch_to_main_session(self, event: MessageEvent) -> None:
-        message = self._render_prompt(event)
-        payload = {
-            "text": message,
-            "mode": "now",
-        }
-        headers = {
-            "Authorization": f"Bearer {self.config.openclaw_hook_token}",
-            "Content-Type": "application/json",
-        }
+    def render_prompt(self, event: MessageEvent) -> str:
+        return self.prompt_template.format(
+            delivery_instructions=self.delivery_instructions(),
+            message_id=event.message_id,
+            room_id=event.room_id,
+            room_channel_id=event.room_channel_id,
+            sender=event.sender,
+            sender_name=event.sender_name,
+            content=event.content,
+            body=event.content,
+            turn_index=event.turn_index,
+            created_at=event.created_at or "",
+            message_json=json.dumps(event.raw_payload, ensure_ascii=False, indent=2, sort_keys=True),
+        )
 
-        async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(
-                self.config.openclaw_wake_hook_url,
-                headers=headers,
-                json=payload,
-            )
-            response.raise_for_status()
-            LOGGER.debug("OpenClaw wake response: %s", response.text)
-
-    def _render_prompt(self, event: MessageEvent) -> str:
-        template_data = {
-            "delivery_instructions": self._build_delivery_instructions(),
-            "message_id": event.message_id,
-            "room_id": event.room_id,
-            "room_channel_id": event.room_channel_id,
-            "sender": event.sender,
-            "sender_name": event.sender_name,
-            "content": event.content,
-            "body": event.content,
-            "turn_index": event.turn_index,
-            "created_at": event.created_at or "",
-            "message_json": json.dumps(event.raw_payload, ensure_ascii=False, indent=2, sort_keys=True),
-        }
-        return self.prompt_template.format(**template_data)
-
-    def _build_delivery_instructions(self) -> str:
-        if not self.config.clawlink_api_base_url or not self.config.clawlink_agent_token:
+    def delivery_instructions(self) -> str:
+        if not self.config.api_base_url or not self.config.agent_token:
             return (
-                "Reply to the other agent normally. "
-                "Bridge delivery credentials were not configured, so ask the operator to wire in "
-                "CLAWLINK_API_BASE_URL and CLAWLINK_AGENT_TOKEN if you need to post automatically."
+                "Reply to the other agent normally. Bridge delivery credentials were not configured, "
+                "so ask the operator to wire in CLAWLINK_API_BASE_URL and CLAWLINK_AGENT_TOKEN if you need to post automatically."
             )
 
-        api_base = self.config.clawlink_api_base_url.rstrip("/")
-        example_body = json.dumps({"content": "YOUR_REPLY_HERE"})
+        api_base = self.config.api_base_url.rstrip("/")
         return (
             "You should answer the other ClawLink agent, not the local operator. "
-            "Write a concise reply to the message body above, then send it back to ClawLink with "
-            f"an HTTP POST to {api_base}/api/messages using Authorization: Bearer "
-            f"{self.config.clawlink_agent_token}. "
-            "The JSON body must contain only a single field named content. "
-            f"Example body: {example_body}"
+            f"Write a concise reply, then POST it to {api_base}/api/messages with "
+            f"Authorization: Bearer {self.config.agent_token}. "
+            'Use JSON with only one field: {"content": "YOUR_REPLY_HERE"}.'
         )
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="clawlink-openclaw-bridge",
-        description="Subscribe to a ClawLink Supabase Realtime room and wake a local OpenClaw gateway.",
-    )
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    common = argparse.ArgumentParser(add_help=False)
-    common.add_argument(
-        "--supabase-url",
-        default=os.environ.get(env_name("SUPABASE_URL")),
-        help=f"Supabase project URL. Env: {env_name('SUPABASE_URL')}",
-    )
-    common.add_argument(
-        "--supabase-anon-key",
-        default=os.environ.get(env_name("SUPABASE_ANON_KEY")),
-        help=f"Supabase anon key. Env: {env_name('SUPABASE_ANON_KEY')}",
-    )
-    common.add_argument(
-        "--api-base-url",
-        default=os.environ.get(env_name("API_BASE_URL")),
-        help=f"ClawLink API base URL for posting replies. Env: {env_name('API_BASE_URL')}",
-    )
-    common.add_argument(
-        "--agent-token",
-        default=os.environ.get(env_name("AGENT_TOKEN")),
-        help=f"ClawLink agent bearer token for posting replies. Env: {env_name('AGENT_TOKEN')}",
-    )
-    common.add_argument(
-        "--room-channel-id",
-        default=os.environ.get(env_name("ROOM_CHANNEL_ID")),
-        help=f"ClawLink room_channel_id. Env: {env_name('ROOM_CHANNEL_ID')}",
-    )
-    common.add_argument(
-        "--local-agent-label",
-        choices=["agent_a", "agent_b"],
-        default=os.environ.get(env_name("LOCAL_AGENT_LABEL")),
-        help=f"Which side this bridge represents. Env: {env_name('LOCAL_AGENT_LABEL')}",
-    )
-    common.add_argument(
-        "--openclaw-dispatch-mode",
-        choices=["agent-hook", "main-session"],
-        default=os.environ.get(
-            env_name("OPENCLAW_DISPATCH_MODE"),
-            DEFAULT_OPENCLAW_DISPATCH_MODE,
-        ),
-        help=(
-            "How to wake OpenClaw: isolated /hooks/agent run or main-session /hooks/wake. "
-            f"Env: {env_name('OPENCLAW_DISPATCH_MODE')}"
-        ),
-    )
-    common.add_argument(
-        "--openclaw-gateway-url",
-        default=os.environ.get(env_name("OPENCLAW_GATEWAY_URL"), DEFAULT_GATEWAY_URL),
-        help=f"Base URL for the local OpenClaw gateway. Env: {env_name('OPENCLAW_GATEWAY_URL')}",
-    )
-    common.add_argument(
-        "--openclaw-hook-path",
-        default=os.environ.get(env_name("OPENCLAW_HOOK_PATH"), DEFAULT_OPENCLAW_HOOK_PATH),
-        help=f"OpenClaw hook path for agent ingress. Env: {env_name('OPENCLAW_HOOK_PATH')}",
-    )
-    common.add_argument(
-        "--openclaw-wake-path",
-        default=os.environ.get(env_name("OPENCLAW_WAKE_PATH"), DEFAULT_OPENCLAW_WAKE_PATH),
-        help=f"OpenClaw wake path for main-session ingress. Env: {env_name('OPENCLAW_WAKE_PATH')}",
-    )
-    common.add_argument(
-        "--openclaw-hook-token",
-        default=os.environ.get(env_name("OPENCLAW_HOOK_TOKEN")),
-        help=f"Shared secret for the local OpenClaw hook endpoint. Env: {env_name('OPENCLAW_HOOK_TOKEN')}",
-    )
-    common.add_argument(
-        "--openclaw-name",
-        default=os.environ.get(env_name("OPENCLAW_NAME"), DEFAULT_OPENCLAW_NAME),
-        help=f"Optional hook run name shown inside OpenClaw. Env: {env_name('OPENCLAW_NAME')}",
-    )
-    common.add_argument(
-        "--openclaw-agent-id",
-        default=os.environ.get(env_name("OPENCLAW_AGENT_ID")),
-        help=f"Optional OpenClaw agent id. Env: {env_name('OPENCLAW_AGENT_ID')}",
-    )
-    common.add_argument(
-        "--openclaw-model",
-        default=os.environ.get(env_name("OPENCLAW_MODEL")),
-        help=f"Optional OpenClaw model override. Env: {env_name('OPENCLAW_MODEL')}",
-    )
-    common.add_argument(
-        "--openclaw-thinking",
-        default=os.environ.get(env_name("OPENCLAW_THINKING")),
-        help=f"Optional OpenClaw thinking override. Env: {env_name('OPENCLAW_THINKING')}",
-    )
-    common.add_argument(
-        "--openclaw-timeout-seconds",
-        type=int,
-        default=_int_env(env_name("OPENCLAW_TIMEOUT_SECONDS")),
-        help=f"Optional OpenClaw hook timeoutSeconds payload. Env: {env_name('OPENCLAW_TIMEOUT_SECONDS')}",
-    )
-    common.add_argument(
-        "--prompt-template",
-        type=Path,
-        default=Path(os.environ[env_name("PROMPT_TEMPLATE")]).expanduser()
-        if os.environ.get(env_name("PROMPT_TEMPLATE"))
-        else None,
-        help=f"Optional prompt template file. Env: {env_name('PROMPT_TEMPLATE')}",
-    )
-    common.add_argument(
-        "--state-file",
-        type=Path,
-        help=f"Persisted dedupe state file. Env: {env_name('STATE_FILE')}",
-    )
-    common.add_argument(
-        "--pid-file",
-        type=Path,
-        help=f"PID file for background process management. Env: {env_name('PID_FILE')}",
-    )
-    common.add_argument(
-        "--log-file",
-        type=Path,
-        help=f"Log file for background process management. Env: {env_name('LOG_FILE')}",
-    )
-    common.add_argument(
-        "--log-level",
-        default=os.environ.get(env_name("LOG_LEVEL"), "INFO"),
-        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-        help=f"Logging verbosity. Env: {env_name('LOG_LEVEL')}",
-    )
-
-    watch = subparsers.add_parser(
-        "watch",
-        parents=[common],
-        help="Run the bridge in the foreground and stream events.",
-    )
-    watch.set_defaults(handler=handle_watch)
-
-    start = subparsers.add_parser(
-        "start",
-        parents=[common],
-        help="Start the bridge in the background and return immediately.",
-    )
-    start.set_defaults(handler=handle_start)
-
-    stop = subparsers.add_parser(
-        "stop",
-        parents=[common],
-        help="Stop the background bridge process using its PID file.",
-    )
-    stop.set_defaults(handler=handle_stop)
-
-    status = subparsers.add_parser(
-        "status",
-        parents=[common],
-        help="Show whether the background bridge process is running.",
-    )
-    status.set_defaults(handler=handle_status)
-
-    return parser
+def config_env(config: Config) -> dict[str, str]:
+    env = os.environ.copy()
+    values = {
+        "SUPABASE_URL": config.supabase_url,
+        "SUPABASE_ANON_KEY": config.supabase_anon_key,
+        "API_BASE_URL": config.api_base_url,
+        "AGENT_TOKEN": config.agent_token,
+        "ROOM_CHANNEL_ID": config.room_channel_id,
+        "LOCAL_AGENT_LABEL": config.local_agent_label,
+        "OPENCLAW_GATEWAY_URL": config.openclaw_gateway_url,
+        "OPENCLAW_HOOK_PATH": config.openclaw_hook_path,
+        "OPENCLAW_HOOK_TOKEN": config.openclaw_hook_token,
+        "OPENCLAW_NAME": config.openclaw_name,
+        "OPENCLAW_AGENT_ID": config.openclaw_agent_id,
+        "OPENCLAW_MODEL": config.openclaw_model,
+        "OPENCLAW_THINKING": config.openclaw_thinking,
+        "OPENCLAW_TIMEOUT_SECONDS": str(config.openclaw_timeout_seconds) if config.openclaw_timeout_seconds is not None else None,
+        "PROMPT_TEMPLATE": str(config.prompt_template_path) if config.prompt_template_path else None,
+        "STATE_FILE": str(config.state_path),
+        "PID_FILE": str(config.pid_path),
+        "LOG_FILE": str(config.log_path),
+        "LOG_LEVEL": config.log_level,
+    }
+    env.update({env_name(key): value for key, value in values.items() if value})
+    return env
 
 
-def _int_env(name: str) -> Optional[int]:
-    raw = os.environ.get(name)
-    if raw is None or raw == "":
-        return None
-    try:
-        return int(raw)
-    except ValueError as exc:
-        raise SystemExit(f"Invalid integer value in {name}: {raw}") from exc
+def get_config(ctx: typer.Context) -> Config:
+    config = ctx.obj
+    if not isinstance(config, Config):
+        raise typer.BadParameter("Missing CLI configuration")
+    return config
 
 
-def resolve_config(args: argparse.Namespace) -> BridgeConfig:
-    room_channel_id = require_value(args.room_channel_id, "--room-channel-id")
-    local_agent_label = require_value(args.local_agent_label, "--local-agent-label")
-
-    runtime_paths = resolve_runtime_paths(args)
-
-    hook_url = args.openclaw_gateway_url.rstrip("/") + "/" + args.openclaw_hook_path.lstrip("/")
-    wake_url = args.openclaw_gateway_url.rstrip("/") + "/" + args.openclaw_wake_path.lstrip("/")
-
-    return BridgeConfig(
-        supabase_url=require_value(args.supabase_url, "--supabase-url"),
-        supabase_anon_key=require_value(args.supabase_anon_key, "--supabase-anon-key"),
-        clawlink_api_base_url=args.api_base_url,
-        clawlink_agent_token=args.agent_token,
+@app.callback()
+def configure(
+    ctx: typer.Context,
+    supabase_url: Optional[str] = typer.Option(None, envvar=env_name("SUPABASE_URL")),
+    supabase_anon_key: Optional[str] = typer.Option(None, envvar=env_name("SUPABASE_ANON_KEY")),
+    api_base_url: Optional[str] = typer.Option(None, envvar=env_name("API_BASE_URL")),
+    agent_token: Optional[str] = typer.Option(None, envvar=env_name("AGENT_TOKEN")),
+    room_channel_id: Optional[str] = typer.Option(None, envvar=env_name("ROOM_CHANNEL_ID")),
+    local_agent_label: Optional[str] = typer.Option(None, envvar=env_name("LOCAL_AGENT_LABEL")),
+    openclaw_gateway_url: str = typer.Option(DEFAULT_GATEWAY_URL, envvar=env_name("OPENCLAW_GATEWAY_URL")),
+    openclaw_hook_path: str = typer.Option(DEFAULT_HOOK_PATH, envvar=env_name("OPENCLAW_HOOK_PATH")),
+    openclaw_hook_token: Optional[str] = typer.Option(None, envvar=env_name("OPENCLAW_HOOK_TOKEN")),
+    openclaw_name: str = typer.Option(DEFAULT_OPENCLAW_NAME, envvar=env_name("OPENCLAW_NAME")),
+    openclaw_agent_id: Optional[str] = typer.Option(None, envvar=env_name("OPENCLAW_AGENT_ID")),
+    openclaw_model: Optional[str] = typer.Option(None, envvar=env_name("OPENCLAW_MODEL")),
+    openclaw_thinking: Optional[str] = typer.Option(None, envvar=env_name("OPENCLAW_THINKING")),
+    openclaw_timeout_seconds: Optional[int] = typer.Option(None, envvar=env_name("OPENCLAW_TIMEOUT_SECONDS")),
+    prompt_template: Optional[Path] = typer.Option(None, envvar=env_name("PROMPT_TEMPLATE")),
+    state_file: Optional[Path] = typer.Option(None, envvar=env_name("STATE_FILE")),
+    pid_file: Optional[Path] = typer.Option(None, envvar=env_name("PID_FILE")),
+    log_file: Optional[Path] = typer.Option(None, envvar=env_name("LOG_FILE")),
+    log_level: str = typer.Option("INFO", envvar=env_name("LOG_LEVEL")),
+) -> None:
+    ctx.obj = Config(
+        supabase_url=supabase_url,
+        supabase_anon_key=supabase_anon_key,
+        api_base_url=api_base_url,
+        agent_token=agent_token,
         room_channel_id=room_channel_id,
         local_agent_label=local_agent_label,
-        openclaw_dispatch_mode=args.openclaw_dispatch_mode,
-        openclaw_agent_hook_url=hook_url,
-        openclaw_wake_hook_url=wake_url,
-        openclaw_hook_token=require_value(args.openclaw_hook_token, "--openclaw-hook-token"),
-        openclaw_name=args.openclaw_name,
-        openclaw_agent_id=args.openclaw_agent_id,
-        openclaw_model=args.openclaw_model,
-        openclaw_thinking=args.openclaw_thinking,
-        openclaw_timeout_seconds=args.openclaw_timeout_seconds,
-        prompt_template_path=args.prompt_template.expanduser() if args.prompt_template else None,
-        state_file=runtime_paths.state_file,
-        pid_file=runtime_paths.pid_file,
-        log_file=runtime_paths.log_file,
-        log_level=args.log_level,
+        openclaw_gateway_url=openclaw_gateway_url,
+        openclaw_hook_path=openclaw_hook_path,
+        openclaw_hook_token=openclaw_hook_token,
+        openclaw_name=openclaw_name,
+        openclaw_agent_id=openclaw_agent_id,
+        openclaw_model=openclaw_model,
+        openclaw_thinking=openclaw_thinking,
+        openclaw_timeout_seconds=openclaw_timeout_seconds,
+        prompt_template_path=prompt_template.expanduser() if prompt_template else None,
+        state_file=state_file.expanduser() if state_file else None,
+        pid_file=pid_file.expanduser() if pid_file else None,
+        log_file=log_file.expanduser() if log_file else None,
+        log_level=log_level,
     )
 
 
-def resolve_runtime_paths(args: argparse.Namespace) -> RuntimePaths:
-    room_channel_id = require_value(args.room_channel_id, "--room-channel-id")
-    local_agent_label = require_value(args.local_agent_label, "--local-agent-label")
-    return RuntimePaths(
-        state_file=resolve_path(
-            args.state_file,
-            os.environ.get(env_name("STATE_FILE")),
-            default_state_file(room_channel_id, local_agent_label),
-        ),
-        pid_file=resolve_path(
-            args.pid_file,
-            os.environ.get(env_name("PID_FILE")),
-            default_pid_file(room_channel_id, local_agent_label),
-        ),
-        log_file=resolve_path(
-            args.log_file,
-            os.environ.get(env_name("LOG_FILE")),
-            default_log_file(room_channel_id, local_agent_label),
-        ),
-    )
-
-
-def resolve_path(cli_value: Optional[Path], env_value: Optional[str], default: Path) -> Path:
-    if cli_value is not None:
-        return cli_value.expanduser()
-    if env_value:
-        return Path(env_value).expanduser()
-    return default
-
-
-def require_value(value: Optional[str], flag_name: str) -> str:
-    if value is None or value == "":
-        raise SystemExit(f"Missing required value for {flag_name}")
-    return value
-
-
-def configure_logging(level: str, log_file: Optional[Path] = None) -> None:
-    handlers: list[logging.Handler]
-    if log_file is None:
-        handlers = [logging.StreamHandler()]
-    else:
-        ensure_parent_dir(log_file)
-        handlers = [logging.FileHandler(log_file, encoding="utf-8")]
-
-    logging.basicConfig(
-        level=getattr(logging, level.upper()),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        handlers=handlers,
-        force=True,
-    )
-
-
-def handle_watch(args: argparse.Namespace) -> int:
-    config = resolve_config(args)
+@app.command()
+def watch(ctx: typer.Context) -> None:
+    config = get_config(ctx)
+    config.require_watch_values()
     configure_logging(config.log_level)
-    app = BridgeApp(config)
-    return asyncio.run(app.run())
+    raise typer.Exit(asyncio.run(Bridge(config).run()))
 
 
-def handle_start(args: argparse.Namespace) -> int:
-    config = resolve_config(args)
+@app.command()
+def start(ctx: typer.Context) -> None:
+    config = get_config(ctx)
+    config.require_watch_values()
     configure_logging(config.log_level)
 
-    existing_pid = read_pid(config.pid_file)
-    if existing_pid is not None and is_pid_running(existing_pid):
-        print(f"Bridge already running with pid {existing_pid}")
-        return 0
-    if existing_pid is not None:
-        config.pid_file.unlink(missing_ok=True)
+    existing_pid = read_pid(config.pid_path)
+    if existing_pid and pid_running(existing_pid):
+        typer.echo(f"Bridge already running with pid {existing_pid}")
+        return
+    if existing_pid:
+        config.pid_path.unlink(missing_ok=True)
 
-    ensure_parent_dir(config.log_file)
-    log_handle = open(config.log_file, "a", encoding="utf-8")
-    child_argv = build_watch_command(config)
-    child_env = build_watch_env(config)
-    proc = subprocess.Popen(
-        child_argv,
-        env=child_env,
-        stdout=log_handle,
-        stderr=subprocess.STDOUT,
-        stdin=subprocess.DEVNULL,
-        start_new_session=True,
-    )
+    ensure_parent(config.log_path)
+    with open(config.log_path, "a", encoding="utf-8") as log_handle:
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "clawlink_openclaw_bridge", "watch"],
+            env=config_env(config),
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+
     time.sleep(0.5)
     if proc.poll() is not None:
-        print(f"Bridge failed to start. Check log file: {config.log_file}")
-        return 1
+        typer.echo(f"Bridge failed to start. Check log file: {config.log_path}")
+        raise typer.Exit(1)
 
-    print(f"Bridge started in background (pid {proc.pid})")
-    print(f"PID file: {config.pid_file}")
-    print(f"Log file: {config.log_file}")
-    return 0
+    typer.echo(f"Bridge started in background (pid {proc.pid})")
+    typer.echo(f"PID file: {config.pid_path}")
+    typer.echo(f"Log file: {config.log_path}")
 
 
-def handle_stop(args: argparse.Namespace) -> int:
-    runtime_paths = resolve_runtime_paths(args)
-    pid = read_pid(runtime_paths.pid_file)
+@app.command()
+def stop(ctx: typer.Context) -> None:
+    config = get_config(ctx)
+    config.require_runtime_values()
+    pid = read_pid(config.pid_path)
     if pid is None:
-        print(f"No PID file found at {runtime_paths.pid_file}")
-        return 1
-
-    if not is_pid_running(pid):
-        runtime_paths.pid_file.unlink(missing_ok=True)
-        print(f"Removed stale PID file at {runtime_paths.pid_file}")
-        return 0
+        typer.echo(f"No PID file found at {config.pid_path}")
+        raise typer.Exit(1)
+    if not pid_running(pid):
+        config.pid_path.unlink(missing_ok=True)
+        typer.echo(f"Removed stale PID file at {config.pid_path}")
+        return
 
     os.kill(pid, signal.SIGTERM)
     deadline = time.time() + 10
     while time.time() < deadline:
-        if not is_pid_running(pid):
-            runtime_paths.pid_file.unlink(missing_ok=True)
-            print(f"Stopped bridge process {pid}")
-            return 0
+        if not pid_running(pid):
+            config.pid_path.unlink(missing_ok=True)
+            typer.echo(f"Stopped bridge process {pid}")
+            return
         time.sleep(0.2)
 
-    print(f"Sent SIGTERM to {pid}, but it is still running")
-    return 1
+    typer.echo(f"Sent SIGTERM to {pid}, but it is still running")
+    raise typer.Exit(1)
 
 
-def handle_status(args: argparse.Namespace) -> int:
-    runtime_paths = resolve_runtime_paths(args)
-    pid = read_pid(runtime_paths.pid_file)
+@app.command()
+def status(ctx: typer.Context) -> None:
+    config = get_config(ctx)
+    config.require_runtime_values()
+    pid = read_pid(config.pid_path)
     if pid is None:
-        print(f"Bridge is not running (no PID file at {runtime_paths.pid_file})")
-        return 1
+        typer.echo(f"Bridge is not running (no PID file at {config.pid_path})")
+        raise typer.Exit(1)
+    if not pid_running(pid):
+        typer.echo(f"Bridge is not running (stale PID file at {config.pid_path})")
+        raise typer.Exit(1)
 
-    if not is_pid_running(pid):
-        print(f"Bridge is not running (stale PID file at {runtime_paths.pid_file})")
-        return 1
-
-    print(f"Bridge is running with pid {pid}")
-    print(f"Log file: {runtime_paths.log_file}")
-    print(f"State file: {runtime_paths.state_file}")
-    return 0
+    typer.echo(f"Bridge is running with pid {pid}")
+    typer.echo(f"Log file: {config.log_path}")
+    typer.echo(f"State file: {config.state_path}")
 
 
-def read_pid(path: Path) -> Optional[int]:
-    if not path.exists():
-        return None
-    try:
-        return int(path.read_text(encoding="utf-8").strip())
-    except ValueError:
-        return None
-
-
-def build_watch_command(config: BridgeConfig) -> list[str]:
-    command = [
-        sys.executable,
-        "-m",
-        "clawlink_openclaw_bridge",
-        "watch",
-        "--state-file",
-        str(config.state_file),
-        "--pid-file",
-        str(config.pid_file),
-        "--log-file",
-        str(config.log_file),
-        "--log-level",
-        config.log_level,
-    ]
-    if config.openclaw_agent_id:
-        command.extend(["--openclaw-agent-id", config.openclaw_agent_id])
-    if config.openclaw_model:
-        command.extend(["--openclaw-model", config.openclaw_model])
-    if config.openclaw_thinking:
-        command.extend(["--openclaw-thinking", config.openclaw_thinking])
-    if config.openclaw_timeout_seconds is not None:
-        command.extend(["--openclaw-timeout-seconds", str(config.openclaw_timeout_seconds)])
-    if config.prompt_template_path:
-        command.extend(["--prompt-template", str(config.prompt_template_path)])
-    return command
-
-
-def build_watch_env(config: BridgeConfig) -> dict[str, str]:
-    env = os.environ.copy()
-    env.update(
-        {
-            env_name("SUPABASE_URL"): config.supabase_url,
-            env_name("SUPABASE_ANON_KEY"): config.supabase_anon_key,
-            env_name("API_BASE_URL"): config.clawlink_api_base_url or "",
-            env_name("AGENT_TOKEN"): config.clawlink_agent_token or "",
-            env_name("ROOM_CHANNEL_ID"): config.room_channel_id,
-            env_name("LOCAL_AGENT_LABEL"): config.local_agent_label,
-            env_name("OPENCLAW_DISPATCH_MODE"): config.openclaw_dispatch_mode,
-            env_name("OPENCLAW_GATEWAY_URL"): parent_url(config.openclaw_agent_hook_url),
-            env_name("OPENCLAW_HOOK_PATH"): hook_path(config.openclaw_agent_hook_url),
-            env_name("OPENCLAW_WAKE_PATH"): hook_path(config.openclaw_wake_hook_url),
-            env_name("OPENCLAW_HOOK_TOKEN"): config.openclaw_hook_token,
-            env_name("OPENCLAW_NAME"): config.openclaw_name,
-        }
-    )
-    if config.openclaw_agent_id:
-        env[env_name("OPENCLAW_AGENT_ID")] = config.openclaw_agent_id
-    if config.openclaw_model:
-        env[env_name("OPENCLAW_MODEL")] = config.openclaw_model
-    if config.openclaw_thinking:
-        env[env_name("OPENCLAW_THINKING")] = config.openclaw_thinking
-    if config.openclaw_timeout_seconds is not None:
-        env[env_name("OPENCLAW_TIMEOUT_SECONDS")] = str(config.openclaw_timeout_seconds)
-    return env
-
-
-def parent_url(full_hook_url: str) -> str:
-    if "/hooks/" not in full_hook_url:
-        return full_hook_url.rstrip("/")
-    return full_hook_url.split("/hooks/", 1)[0].rstrip("/")
-
-
-def hook_path(full_hook_url: str) -> str:
-    if "/hooks/" not in full_hook_url:
-        return DEFAULT_OPENCLAW_HOOK_PATH
-    return "/hooks/" + full_hook_url.split("/hooks/", 1)[1].lstrip("/")
-
-
-def main(argv: Optional[list[str]] = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    return args.handler(args)
+def main() -> None:
+    app()

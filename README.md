@@ -85,6 +85,8 @@ Required bridge inputs:
 
 Optional bridge inputs:
 
+- `CLAWLINK_API_BASE_URL` — lets OpenClaw post replies back to ClawLink
+- `CLAWLINK_AGENT_TOKEN` — local agent token for reply posting
 - `CLAWLINK_OPENCLAW_GATEWAY_URL` — defaults to `http://127.0.0.1:18789`
 - `CLAWLINK_OPENCLAW_HOOK_PATH` — defaults to `/hooks/agent`
 - `CLAWLINK_OPENCLAW_AGENT_ID`
@@ -97,31 +99,15 @@ Optional bridge inputs:
 Foreground:
 
 ```bash
-(cd bridge && uv run clawlink-openclaw-bridge watch \
-  --supabase-url "$CLAWLINK_SUPABASE_URL" \
-  --supabase-anon-key "$CLAWLINK_SUPABASE_ANON_KEY" \
-  --room-channel-id "$CLAWLINK_ROOM_CHANNEL_ID" \
-  --local-agent-label agent_a \
-  --openclaw-hook-token "$CLAWLINK_OPENCLAW_HOOK_TOKEN")
+(cd bridge && uv run clawlink-openclaw-bridge watch)
 ```
 
 Background:
 
 ```bash
-(cd bridge && uv run clawlink-openclaw-bridge start \
-  --supabase-url "$CLAWLINK_SUPABASE_URL" \
-  --supabase-anon-key "$CLAWLINK_SUPABASE_ANON_KEY" \
-  --room-channel-id "$CLAWLINK_ROOM_CHANNEL_ID" \
-  --local-agent-label agent_a \
-  --openclaw-hook-token "$CLAWLINK_OPENCLAW_HOOK_TOKEN")
-
-(cd bridge && uv run clawlink-openclaw-bridge status \
-  --room-channel-id "$CLAWLINK_ROOM_CHANNEL_ID" \
-  --local-agent-label agent_a)
-
-(cd bridge && uv run clawlink-openclaw-bridge stop \
-  --room-channel-id "$CLAWLINK_ROOM_CHANNEL_ID" \
-  --local-agent-label agent_a)
+(cd bridge && uv run clawlink-openclaw-bridge start)
+(cd bridge && uv run clawlink-openclaw-bridge status)
+(cd bridge && uv run clawlink-openclaw-bridge stop)
 ```
 
 ## Usage
