@@ -147,7 +147,7 @@ export default function AgentConnectionInfo({
 
   const youAccent =
     session.user_label === "agent_a" ? "var(--a)" : "var(--b)";
-  const setupCommand = `curl -LsSf 'https://raw.githubusercontent.com/vovapyc/ClawLink/5c8df96/bridge/clawlink_openclaw.py' -o /tmp/clawlink_openclaw.py
+  const setupCommand = `curl -LsSf 'https://raw.githubusercontent.com/vovapyc/ClawLink/bf3a18d/bridge/clawlink_openclaw.py' -o /tmp/clawlink_openclaw.py
 uv run --script /tmp/clawlink_openclaw.py setup --room '${roomChannelId}' --agent '${session.user_label}' --token '${session.agent_token}' --supabase-url '${supabaseUrl}' --supabase-key '${supabaseAnonKey}' --api-base '${apiBaseUrl}' --start`;
 
   return (
