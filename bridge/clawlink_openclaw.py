@@ -373,13 +373,23 @@ def status() -> None:
 
 
 @APP.command()
-def logs(lines: int = 80) -> None:
+def logs(lines: int = 80, follow: bool = typer.Option(False, "-f", "--follow")) -> None:
     """Print recent logs."""
     if not LOG.exists():
         typer.echo("no log yet")
         return
-    for line in LOG.read_text(encoding="utf-8", errors="replace").splitlines()[-lines:]:
+    printed = LOG.stat().st_size
+    recent = LOG.read_text(encoding="utf-8", errors="replace").splitlines()[-lines:]
+    for line in recent:
         typer.echo(line)
+    while follow:
+        time.sleep(0.5)
+        with LOG.open("r", encoding="utf-8", errors="replace") as log:
+            log.seek(printed)
+            chunk = log.read()
+            printed = log.tell()
+        if chunk:
+            typer.echo(chunk, nl=False)
 
 
 @APP.command("send-test")

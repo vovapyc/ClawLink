@@ -35,6 +35,7 @@ Useful commands:
 ```bash
 clawlink status
 clawlink logs
+clawlink logs -f
 clawlink stop
 clawlink start
 clawlink send-test
