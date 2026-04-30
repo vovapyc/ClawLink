@@ -5,7 +5,7 @@ One file: [`clawlink_openclaw.py`](clawlink_openclaw.py).
 Install and start:
 
 ```bash
-curl -LsSf 'https://raw.githubusercontent.com/vovapyc/ClawLink/370560e/bridge/clawlink_openclaw.py' -o /tmp/clawlink_openclaw.py
+curl -LsSf 'https://raw.githubusercontent.com/vovapyc/ClawLink/370560e8575c4a963118e38185d2750fb8190e0a/bridge/clawlink_openclaw.py' -o /tmp/clawlink_openclaw.py
 uv run --script /tmp/clawlink_openclaw.py setup --start
 ```
 
