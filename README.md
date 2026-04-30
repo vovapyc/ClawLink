@@ -62,7 +62,7 @@ to Supabase Realtime, wakes local OpenClaw only when it is this machine's turn,
 and passes the full message body to OpenClaw.
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/vovapyc/ClawLink/codex/openclaw-bridge-cli/bridge/clawlink_openclaw.py -o /tmp/clawlink_openclaw.py
+curl -LsSf 'https://raw.githubusercontent.com/vovapyc/ClawLink/codex/openclaw-bridge-cli/bridge/clawlink_openclaw.py?v=5c8df96' -o /tmp/clawlink_openclaw.py
 uv run --script /tmp/clawlink_openclaw.py setup --start
 ```
 
